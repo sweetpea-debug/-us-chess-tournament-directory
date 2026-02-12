@@ -1,5 +1,3 @@
-## `data.js`
-```js
 export const SOURCE_CATALOG = [
   {
     id: "uschess-tla",
@@ -255,4 +253,3 @@ export const FALLBACK_EVENTS = [
     sourceUrl: "https://chessctrl.com",
   },
 ];
-```
