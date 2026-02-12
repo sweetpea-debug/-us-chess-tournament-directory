@@ -1,5 +1,3 @@
-## `scripts/build_events.py`
-```py
 #!/usr/bin/env python3
 """Daily ingest for US chess tournaments."""
 
@@ -188,4 +186,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-```
