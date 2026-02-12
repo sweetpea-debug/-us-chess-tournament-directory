@@ -1,21 +1,23 @@
+## `details.js`
+```js
 import { SOURCE_CATALOG } from "./data.js";
 import { formatDateRange } from "./utils.js";
 
 const detailsRoot = document.getElementById("details");
 
-function sourceById(sourceId) {
+function resolveSource(sourceId) {
   return SOURCE_CATALOG.find((source) => source.id === sourceId);
 }
 
-function renderMissing() {
+function missingView() {
   detailsRoot.innerHTML = `
     <h1>Tournament not found</h1>
-    <p class="muted">Go back and open a tournament card again.</p>
+    <p class="muted">Return to the main page and open a tournament card again.</p>
   `;
 }
 
 function renderTournament(event) {
-  const source = sourceById(event.sourceId);
+  const source = resolveSource(event.sourceId);
   detailsRoot.innerHTML = `
     <h1>${event.name}</h1>
     <p><strong>Dates:</strong> ${formatDateRange(event.startDate, event.endDate)}</p>
@@ -26,30 +28,32 @@ function renderTournament(event) {
     <p><strong>Entry fee:</strong> ${event.entryFee || "See source"}</p>
     <p><strong>Source:</strong> ${source?.name || "Unknown source"}</p>
     <p><a href="${event.sourceUrl}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
+    ${source ? `<p><a href="${source.homepage}" target="_blank" rel="noopener noreferrer">Visit source homepage</a></p>` : ""}
   `;
 }
 
 function init() {
   const params = new URLSearchParams(window.location.search);
   const eventId = params.get("id");
-  const raw = sessionStorage.getItem("selectedTournament");
+  const stored = sessionStorage.getItem("usChessSelectedTournament");
 
-  if (!raw) {
-    renderMissing();
+  if (!stored) {
+    missingView();
     return;
   }
 
   try {
-    const event = JSON.parse(raw);
+    const event = JSON.parse(stored);
     if (!eventId || event.id !== eventId) {
-      renderMissing();
+      missingView();
       return;
     }
+
     renderTournament(event);
   } catch {
-    renderMissing();
+    missingView();
   }
 }
 
 init();
-
+```
