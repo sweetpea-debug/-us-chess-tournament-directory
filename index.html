@@ -1,1 +1,86 @@
 
+---
+
+### `index.html`
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>US Chess Tournament Directory</title>
+    <meta
+      name="description"
+      content="Daily-updating United States chess tournament directory with state and city-radius filters."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="container">
+        <p class="hero__eyebrow">US CHESS TOURNAMENT DIRECTORY</p>
+        <h1>Find tournaments across the United States</h1>
+        <p class="hero__subtitle">
+          Aggregated from federation calendars, organizer pages, and event platforms.
+        </p>
+        <div class="hero__meta">
+          <span id="sync-label">Last sync: never</span>
+          <button id="refresh-button" type="button" class="btn btn--secondary">Refresh now</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container layout">
+      <aside class="panel" aria-label="Filters">
+        <h2>Filters</h2>
+
+        <label class="field" for="state-filter">
+          <span>US state</span>
+          <select id="state-filter">
+            <option value="all">All states</option>
+          </select>
+        </label>
+
+        <label class="field" for="city-input">
+          <span>Within 100 miles of city</span>
+          <input id="city-input" type="text" placeholder="Dallas, TX" autocomplete="off" />
+        </label>
+
+        <div class="row">
+          <button id="apply-city" type="button" class="btn">Apply</button>
+          <button id="clear-city" type="button" class="btn btn--secondary">Clear</button>
+        </div>
+
+        <p id="status-message" class="muted" aria-live="polite"></p>
+
+        <section class="sources" aria-label="Tracked online sources">
+          <h3>Tracked online sources</h3>
+          <ul id="source-list"></ul>
+        </section>
+      </aside>
+
+      <section class="panel" aria-label="Tournament results">
+        <div class="results-head">
+          <h2>Tournaments</h2>
+          <p id="result-count" class="muted">Loading…</p>
+        </div>
+
+        <div id="cards" class="cards"></div>
+      </section>
+    </main>
+
+    <template id="card-template">
+      <article class="card">
+        <h3 class="card__title"></h3>
+        <p class="card__dates"></p>
+        <p class="card__location"></p>
+        <p class="card__format"></p>
+        <div class="chips"></div>
+        <button type="button" class="btn card__open">Open details</button>
+      </article>
+    </template>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
+
