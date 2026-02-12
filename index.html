@@ -1,3 +1,6 @@
+
+### `index.html`​:codex-file-citation[codex-file-citation]{line_range_start=1 line_range_end=101 path=index.html git_url="https://github.com/sweetpea-debug/chess/blob/main/index.html#L1-L101"}​
+```html
 <!doctype html>
 <html lang="en">
   <head>
@@ -58,7 +61,7 @@
       <section class="panel" aria-label="Tournament results">
         <div class="results-head">
           <h2>Tournaments</h2>
-          <p id="result-count" class="muted">Loading…</p>
+          <p id="result-count" class="muted">Waiting for data…</p>
         </div>
 
         <div id="cards" class="cards"></div>
@@ -76,6 +79,26 @@
       </article>
     </template>
 
+    <script>
+      window.__radarBooted = false;
+      window.setTimeout(() => {
+        if (window.__radarBooted) return;
+
+        const status = document.getElementById("status-message");
+        const resultCount = document.getElementById("result-count");
+        const cards = document.getElementById("cards");
+
+        if (status) {
+          status.textContent = "The app script did not load. Re-copy app.js, data.js, and utils.js as full files.";
+        }
+        if (resultCount) {
+          resultCount.textContent = "Data did not load";
+        }
+        if (cards && !cards.children.length) {
+          cards.innerHTML = '<p class="muted">No cards rendered yet. This usually means one JS file was pasted with extra markdown text.</p>';
+        }
+      }, 2500);
+    </script>
     <script type="module" src="app.js"></script>
   </body>
 </html>
