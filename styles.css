@@ -1,3 +1,5 @@
+## `styles.css`
+```css
 :root {
   --bg: #09101d;
   --panel: #111a2f;
@@ -203,4 +205,5 @@ a {
     grid-template-columns: 1fr;
   }
 }
+```
 
