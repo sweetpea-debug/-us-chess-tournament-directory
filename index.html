@@ -1,27 +1,188 @@
+# Full final file contents (copy/paste bundle)
 
----
+## `.github/workflows/daily-events-ingest.yml`
+```yaml
+name: Daily events ingest
 
-### `index.html`
+on:
+  schedule:
+    - cron: "15 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-events:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build events.json
+        run: python scripts/build_events.py
+
+      - name: Commit updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add events.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: update daily events feed"
+          git push
+```
+
+## `HOW_TO_UPDATE_IN_GITHUB_UI.md`
+```md
+# How to update this project using GitHub in your browser (no terminal)
+
+This guide is for beginners who edit files directly on GitHub.com.
+
+## Important rule first
+
+- **Do not paste red/green diff text into files.**
+- Diffs are just change previews.
+- Always copy the **final file content**.
+
+## Step-by-step workflow
+
+1. Open your repository on GitHub.
+2. Open the Pull Request that contains the changes you want.
+3. Click **Files changed**.
+4. For each changed file:
+   - Click the `...` menu on that file panel.
+   - Click **View file** (this shows clean file content, not diff markup).
+   - Copy the file content.
+5. Go back to your repo and open the matching file on your branch.
+6. Click the pencil icon (**Edit this file**).
+7. Select all existing file text and paste the copied content.
+8. Scroll down to **Commit changes...**.
+9. Use a message like `Update <filename> from PR`.
+10. Click **Commit changes**.
+11. Repeat for all changed files.
+
+## After updating files
+
+1. Go to **Settings → Pages**.
+2. Confirm your Pages site is deployed from `main` and `/(root)`.
+3. Wait 1–3 minutes after commits.
+4. Open the Pages URL and verify:
+   - cards render,
+   - filters work,
+   - details page opens.
+
+## Troubleshooting
+
+- If the site looks old, do a hard refresh (`Ctrl+Shift+R` or `Cmd+Shift+R`).
+- If Pages URL is missing, check **Settings → Pages** and **Actions** for deployment status.
+- If a file looks broken, compare it against **View file** in the PR again (not the diff view).
+
+## If your Codex/Chat view only shows "Copy patch" and "Copy git apply"
+
+That is normal in some chat UIs. In that case, use this beginner-safe approach:
+
+1. **Do not** paste the raw patch into your GitHub files.
+2. Ask for the **full final content of each file** (for example: `app.js`, `index.html`, `styles.css`).
+3. In GitHub, open that file → click the pencil icon (**Edit this file**) → replace all text.
+4. Click **Commit changes**.
+5. Repeat for each file.
+
+Why: patch format includes metadata (`diff --git`, `@@`, `+`, `-`) and is not the same as final file content.
+```
+
+## `README.md`
+```md
+# US Chess Tournament Radar
+
+A standalone project for discovering U.S. chess tournaments with daily-published event data.
+
+## What this website does
+
+- Displays tournaments as clickable cards.
+- Opens a dedicated details page with source links.
+- Filters by U.S. state.
+- Filters by events within 100 miles of a city.
+- Shows a tracked source catalog.
+
+## Daily server-side ingest
+
+This repo now uses a **server-side daily ingest job** (GitHub Actions) that builds `events.json`.
+
+- Workflow file: `.github/workflows/daily-events-ingest.yml`
+- Ingest script: `scripts/build_events.py`
+- Published feed consumed by the front-end: `events.json`
+
+The front-end reads `events.json` first and falls back to seeded data if unavailable.
+
+## Sources tracked
+
+- US Chess Tournament Life Announcements
+- US Chess Events
+- FIDE Tournament Calendar
+- ChessEvents
+- Chess-Results
+- Continental Chess Association
+- Charlotte Chess Center
+- Saint Louis Chess Club
+- Vegas Chess Festival
+- Chess Control
+
+## Run locally
+
+```bash
+python3 -m http.server 8000
+```
+
+Open:
+
+- `http://127.0.0.1:8000/index.html`
+
+## If you are updating files from GitHub web UI
+
+Do **not** copy/paste raw red/green diff output line-by-line.
+
+Use one of these safer options:
+
+1. **Open each changed file directly** and replace the full file content with the latest version.
+2. If you have a Pull Request, use **Files changed → ... → View file** to copy the final file contents (not the diff markers).
+3. Commit each file update in GitHub's editor, then verify the deployed GitHub Pages site.
+
+Tip: a diff is a *comparison format*, not a runnable file format.
+
+Need click-by-click help? See [`HOW_TO_UPDATE_IN_GITHUB_UI.md`](./HOW_TO_UPDATE_IN_GITHUB_UI.md).
+If you only see **"Copy patch"** / **"Copy git apply"** in chat, follow the fallback steps in [`HOW_TO_UPDATE_IN_GITHUB_UI.md`](./HOW_TO_UPDATE_IN_GITHUB_UI.md).
+```
+
+## `index.html`
 ```html
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>US Chess Tournament Directory</title>
+    <title>US Chess Tournament Radar</title>
     <meta
       name="description"
-      content="Daily-updating United States chess tournament directory with state and city-radius filters."
+      content="Daily-updating United States chess tournament directory with source aggregation, state filters, and 100-mile city search."
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="hero">
       <div class="container">
-        <p class="hero__eyebrow">US CHESS TOURNAMENT DIRECTORY</p>
+        <p class="hero__eyebrow">UNITED STATES CHESS TOURNAMENT RADAR</p>
         <h1>Find tournaments across the United States</h1>
         <p class="hero__subtitle">
-          Aggregated from federation calendars, organizer pages, and event platforms.
+          Aggregated from federation calendars, organizer pages, and event platforms. Data refreshes
+          every 24 hours.
         </p>
         <div class="hero__meta">
           <span id="sync-label">Last sync: never</span>
@@ -83,4 +244,4 @@
     <script type="module" src="app.js"></script>
   </body>
 </html>
-
+```
