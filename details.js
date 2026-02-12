@@ -1,5 +1,3 @@
-## `details.js`
-```js
 import { SOURCE_CATALOG } from "./data.js";
 import { formatDateRange } from "./utils.js";
 
@@ -56,4 +54,3 @@ function init() {
 }
 
 init();
-```
