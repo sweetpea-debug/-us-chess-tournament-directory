@@ -1,6 +1,6 @@
 {
-  "syncedAt": "2026-02-14T02:43:38.797006+00:00",
-  "eventCount": 50,
+  "syncedAt": "2026-02-14T07:05:19.097137+00:00",
+  "eventCount": 51,
   "events": [
     {
       "id": "world-open-2026",
@@ -229,7 +229,41 @@
       "sourceUrl": "https://chessevents.com"
     },
     {
-      "id": "chessevents-live-1-liberty-bell-open-https-chessevents-com-event-libertybell",
+      "id": "chessevents-live-1-new-york-state-senior-championship-https-chessevents-com-eve",
+      "name": "*   [New York State Senior Championship](https://chessevents.com/event/nysenior)",
+      "startDate": "2026-01-01",
+      "endDate": "2026-01-01",
+      "city": "Unknown",
+      "state": "US",
+      "venue": "ChessEvents",
+      "lat": 39.8283,
+      "lon": -98.5795,
+      "format": "See source listing",
+      "entryFee": "See source listing",
+      "sections": [],
+      "timeControl": "See source listing",
+      "sourceId": "chessevents",
+      "sourceUrl": "https://chessevents.com"
+    },
+    {
+      "id": "chessevents-live-2-new-york-state-high-school-championships-https-chessevents-c",
+      "name": "*   [New York State High School Championships](https://chessevents.com/event/nyhighschool)",
+      "startDate": "2026-01-01",
+      "endDate": "2026-01-01",
+      "city": "Unknown",
+      "state": "US",
+      "venue": "ChessEvents",
+      "lat": 39.8283,
+      "lon": -98.5795,
+      "format": "See source listing",
+      "entryFee": "See source listing",
+      "sections": [],
+      "timeControl": "See source listing",
+      "sourceId": "chessevents",
+      "sourceUrl": "https://chessevents.com"
+    },
+    {
+      "id": "chessevents-live-3-liberty-bell-open-https-chessevents-com-event-libertybell",
       "name": "*   [Liberty Bell Open](https://chessevents.com/event/libertybell)",
       "startDate": "2026-01-01",
       "endDate": "2026-01-01",
@@ -246,24 +280,7 @@
       "sourceUrl": "https://chessevents.com"
     },
     {
-      "id": "chessevents-live-2-golden-state-open-https-chessevents-com-event-goldenstate",
-      "name": "*   [Golden State Open](https://chessevents.com/event/goldenstate)",
-      "startDate": "2026-01-01",
-      "endDate": "2026-01-01",
-      "city": "Unknown",
-      "state": "US",
-      "venue": "ChessEvents",
-      "lat": 39.8283,
-      "lon": -98.5795,
-      "format": "See source listing",
-      "entryFee": "See source listing",
-      "sections": [],
-      "timeControl": "See source listing",
-      "sourceId": "chessevents",
-      "sourceUrl": "https://chessevents.com"
-    },
-    {
-      "id": "chessevents-live-3-all-tournaments-https-chessevents-com-tournaments",
+      "id": "chessevents-live-4-all-tournaments-https-chessevents-com-tournaments",
       "name": "*   [All Tournaments](https://chessevents.com/tournaments)",
       "startDate": "2026-01-01",
       "endDate": "2026-01-01",
@@ -280,7 +297,7 @@
       "sourceUrl": "https://chessevents.com"
     },
     {
-      "id": "chessevents-live-4-this-site-is-for-some-of-the-major-chess-tournaments-that-ar",
+      "id": "chessevents-live-5-this-site-is-for-some-of-the-major-chess-tournaments-that-ar",
       "name": "This site is for some of the major chess tournaments that are run by the [Continental Chess Association](https://www.che",
       "startDate": "2026-01-01",
       "endDate": "2026-01-01",
@@ -297,7 +314,7 @@
       "sourceUrl": "https://chessevents.com"
     },
     {
-      "id": "chessevents-live-5-general-tournament-information-https-www-chesstour-com-gen-h",
+      "id": "chessevents-live-6-general-tournament-information-https-www-chesstour-com-gen-h",
       "name": "[General Tournament Information](https://www.chesstour.com/gen.html) \u2013 This page details contact information, how to ent",
       "startDate": "2026-01-01",
       "endDate": "2026-01-01",
@@ -314,7 +331,7 @@
       "sourceUrl": "https://chessevents.com"
     },
     {
-      "id": "chessevents-live-6-tournament-rules-https-www-chesstour-com-rules-pdf-even-thou",
+      "id": "chessevents-live-7-tournament-rules-https-www-chesstour-com-rules-pdf-even-thou",
       "name": "[Tournament Rules](https://www.chesstour.com/rules.pdf) \u2013 Even though all the tournaments are run using the latest [Unit",
       "startDate": "2026-01-01",
       "endDate": "2026-01-01",
@@ -331,7 +348,7 @@
       "sourceUrl": "https://chessevents.com"
     },
     {
-      "id": "chessevents-live-7-tournament-equipment-to-play-chess-at-a-continental-chess-as",
+      "id": "chessevents-live-8-tournament-equipment-to-play-chess-at-a-continental-chess-as",
       "name": "**Tournament Equipment** \u2013 To play chess at a Continental Chess Association tournament you will need to bring your own b",
       "startDate": "2026-01-01",
       "endDate": "2026-01-01",
