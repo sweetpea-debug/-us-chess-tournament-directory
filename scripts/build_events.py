@@ -2,13 +2,17 @@
 """
 Daily ingest for chess tournaments.
 
-TEST MODE (as requested):
+TEST MODE:
 - Only pulls from:
   1) US Chess Upcoming Tournaments (new.uschess.org/upcoming-tournaments)
-  2) Michigan Chess Association events (michess.org/events + event details)
-- Emits only "real" events (must have a parseable date)
-- Filters out past events (endDate < today)
-- Writes events.json in repo root: { syncedAt, events }
+  2) Michigan Chess Association events (michess.org/events -> follow /event-details/... pages)
+
+Outputs repo-root events.json as:
+  { "syncedAt": "<iso>", "events": [ ... ] }
+
+Notes:
+- Standard library only (no external deps).
+- US Chess pagination is 0-indexed via ?page=0,1,2... :contentReference[oaicite:4]{index=4}
 """
 
 from __future__ import annotations
@@ -16,11 +20,11 @@ from __future__ import annotations
 import html
 import json
 import re
-from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 
@@ -29,7 +33,6 @@ from urllib.request import Request, urlopen
 # ----------------------------
 
 HERE = Path(__file__).resolve()
-# If this file is scripts/build_events.py, repo root is parent of scripts/
 ROOT = HERE.parents[1] if HERE.parent.name == "scripts" else HERE.parent
 OUTPUT_PATH = ROOT / "events.json"
 
@@ -64,9 +67,6 @@ DEFAULT_TIMEOUT_SECS = 25
 USER_AGENT = "Mozilla/5.0 (compatible; TournamentRadarBot/1.0; +https://github.com/)"
 
 def fetch_text(url: str) -> str:
-    """
-    Basic fetch helper. Raises on non-200 responses.
-    """
     req = Request(
         url,
         headers={
@@ -77,7 +77,6 @@ def fetch_text(url: str) -> str:
     try:
         with urlopen(req, timeout=DEFAULT_TIMEOUT_SECS) as resp:
             raw = resp.read()
-            # Try UTF-8 first; fall back if needed.
             try:
                 return raw.decode("utf-8", errors="replace")
             except Exception:
@@ -91,23 +90,20 @@ def fetch_text(url: str) -> str:
 # ----------------------------
 
 def _strip_html_to_lines(markup: str) -> list[str]:
-    """
-    Convert HTML into a list of cleaned text lines.
-    This is intentionally lightweight (no external deps).
-    """
-    # Drop scripts/styles
     markup = re.sub(r"<script\b[^>]*>.*?</script>", " ", markup, flags=re.I | re.S)
     markup = re.sub(r"<style\b[^>]*>.*?</style>", " ", markup, flags=re.I | re.S)
 
-    # Turn common block ends into newlines
-    markup = re.sub(r"</(p|div|li|h1|h2|h3|h4|tr|td|th|section|article|header|footer)\s*>", "\n", markup, flags=re.I)
+    markup = re.sub(
+        r"</(p|div|li|h1|h2|h3|h4|tr|td|th|section|article|header|footer)\s*>",
+        "\n",
+        markup,
+        flags=re.I,
+    )
     markup = re.sub(r"<br\s*/?>", "\n", markup, flags=re.I)
 
-    # Drop remaining tags
     text = re.sub(r"<[^>]+>", " ", markup)
     text = html.unescape(text)
 
-    # Normalize whitespace into clean lines
     lines: list[str] = []
     for raw in text.splitlines():
         line = re.sub(r"\s+", " ", raw).strip()
@@ -124,10 +120,6 @@ def sanitize_slug(value: str) -> str:
 
 
 def dedupe(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Dedupe by (name + startDate + city + state) to avoid repeats.
-    Prefer the first occurrence.
-    """
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for e in events:
@@ -140,16 +132,13 @@ def dedupe(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def is_upcoming(event: dict[str, Any]) -> bool:
-    """
-    Keep events that end today or later.
-    """
     today = date.today().isoformat()
     end_date = str(event.get("endDate") or "")
     return bool(end_date) and end_date >= today
 
 
 # ----------------------------
-# US Chess date parsing
+# Shared parsing helpers
 # ----------------------------
 
 US_STATE_ABBR = {
@@ -168,33 +157,34 @@ MONTHS = {
     "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
 }
 
-def _parse_us_chess_date_one(s: str) -> date | None:
-    """
-    Parses: 'Wednesday, February 18, 2026' or 'February 18, 2026'
-    """
+MONTHS_ABBR = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
+}
+
+def _clean_title_line(s: str) -> str:
+    # Turns: '### ' -> 'Friday Night Quad (Scholastic)'
     s = s.strip()
-    s = re.sub(r"^[A-Za-z]+,\s*", "", s)  # remove weekday if present
+    s = re.sub(r"^#+\s*", "", s)
+    s = re.sub(r"^【\d+†\s*", "", s)
+    s = s.replace("】", "").strip()
+    return s
+
+def _parse_us_chess_date_one(s: str) -> date | None:
+    s = s.strip()
+    s = re.sub(r"^[A-Za if present
     m = re.match(r"^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$", s)
     if not m:
         return None
     mon = MONTHS.get(m.group(1).lower())
     if not mon:
         return None
-    day = int(m.group(2))
-    yr = int(m.group(3))
     try:
-        return date(yr, mon, day)
+        return date(int(m.group(3)), mon, int(m.group(2)))
     except ValueError:
         return None
 
-
 def _parse_us_chess_date_range(s: str) -> tuple[str, str] | None:
-    """
-    Parses date ranges like:
-      'Saturday, January 3, 2026 - Sunday, January 4, 2026'
-    or single dates like:
-      'Wednesday, February 18, 2026'
-    """
     s = s.strip()
     parts = [p.strip() for p in s.split(" - ")]
     if not parts:
@@ -207,153 +197,310 @@ def _parse_us_chess_date_range(s: str) -> tuple[str, str] | None:
         end = start
     return (start.isoformat(), end.isoformat())
 
+def _parse_location_flexible(loc: str) -> tuple[str, str] | None:
+    """
+    Accept:
+      - 'City, StateName'
+      - 'City, ST'
+      - 'City, ST, StateName'  (common on US Chess: 'Brooklyn, NY, New York') :contentReference[oaicite:7]{index=7}
+    """
+    parts = [p.strip() for p in loc.split(",") if p.strip()]
+    if len(parts) == 2:
+        city, s2 = parts
+        if re.fullmatch(r"[A-Z]{2}", s2):
+            return city, s2
+        abbr = US_STATE_ABBR.get(s2.lower())
+        return (city, abbr) if abbr else None
+
+    if len(parts) >= 3:
+        city = parts[0]
+        mid = parts[1]
+        last = parts[-1]
+        if re.fullmatch(r"[A-Z]{2}", mid):
+            return city, mid
+        abbr = US_STATE_ABBR.get(last.lower())
+        return (city, abbr) if abbr else None
+
+    return None
+
 
 # ----------------------------
 # Parser: US Chess Upcoming Tournaments
 # ----------------------------
 
+def _uschess_title_to_url_map(page_html: str, base_url: str) -> dict[str, str]:
+    """
+    Extract event links from the HTML and map by normalized title.
+    """
+    m: dict[str, str] = {}
+    # common structure: <h3 ...><a href="/event/...">TITLE</a></h3>
+    for href, inner in re.findall(r"<h3[^>]*>\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", page_html, flags=re.I | re.S):
+        title = html.unescape(re.sub(r"<[^>]+>", " ", inner))
+        title = re.sub(r"\s+", " ", title).strip()
+        if not title:
+            continue
+        full = urljoin(base_url, href)
+        m[title.lower()] = full
+    return m
+
+
 def parse_uschess_upcoming(page_html: str, source: dict[str, Any]) -> list[dict[str, Any]]:
     lines = _strip_html_to_lines(page_html)
+    title_url = _uschess_title_to_url_map(page_html, source["homepage"])
 
     out: list[dict[str, Any]] = []
 
-    def parse_location(loc: str) -> tuple[str, str] | None:
-        # Accept "City, ST" or "City, StateName"
-        m = re.match(r"^(.+?),\s*([A-Z]{2})\b", loc)
-        if m:
-            return (m.group(1).strip(), m.group(2).strip())
-
-        m2 = re.match(r"^(.+?),\s*([A-Za-z .'-]+)$", loc)
-        if not m2:
-            return None
-        city = m2.group(1).strip()
-        state_name = m2.group(2).strip().lower()
-        abbr = US_STATE_ABBR.get(state_name)
-        if not abbr:
-            return None
-        return (city, abbr)
-
-    # Pattern on the page is generally:
-    # Title
-    # City, StateName
-    # Date line
-    # Organizer
-    #
-    # We'll scan for that.
-    for i in range(0, len(lines) - 4):
-        title = lines[i].strip()
-        loc = lines[i + 1].strip()
-        date_line = lines[i + 2].strip()
-
-        # Basic title sanity
-        if len(title) < 6:
-            continue
-        if title.lower() in {"upcoming tournaments", "tournaments", "events"}:
+    # We key off '### ' lines (see page text structure) :contentReference[oaicite:8]{index=8}
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith("###"):
+            i += 1
             continue
 
-        loc_parsed = parse_location(loc)
-        dr = _parse_us_chess_date_range(date_line)
+        title = _clean_title_line(lines[i])
+        # Look ahead for location and date within the next ~6 lines.
+        loc = None
+        dr = None
+        organizer = ""
+        desc_lines: list[str] = []
 
-        if not loc_parsed or not dr:
+        for j in range(i + 1, min(i + 10, len(lines))):
+            if loc is None:
+                loc_try = _parse_location_flexible(lines[j])
+                if loc_try:
+                    loc = loc_try
+                    continue
+            if dr is None:
+                dr_try = _parse_us_chess_date_range(lines[j])
+                if dr_try:
+                    dr = dr_try
+                    continue
+
+        # Organizer is usually one line after the date; grab the first "non-empty" line after date
+        if dr:
+            # find where the date line was
+            for j in range(i + 1, min(i + 12, len(lines))):
+                if lines[j].strip() and _parse_us_chess_date_range(lines[j]):
+                    # next non-empty line is organizer (if exists)
+                    for k in range(j + 1, min(j + 4, len(lines))):
+                        if lines[k].strip() and not lines[k].startswith("###"):
+                            organizer = lines[k].strip()
+                            break
+                    break
+
+        # Description: collect until next title or pagination header, to parse simple fields
+        k = i + 1
+        while k < len(lines) and not lines[k].startswith("###") and "#### Pagination" not in lines[k]:
+            desc_lines.append(lines[k])
+            k += 1
+
+        if not loc or not dr:
+            i += 1
             continue
 
-        city, state = loc_parsed
+        city, state = loc
         startDate, endDate = dr
+
+        desc = " ".join(desc_lines)
+        desc = re.sub(r"\s+", " ", desc).strip()
+
+        # Basic parsing from description
+        entry_fee = ""
+        m_fee = re.search(r"Entry fee:\s*([^.;]+)", desc, flags=re.I)
+        if m_fee:
+            entry_fee = m_fee.group(1).strip()
+
+        time_control = ""
+        m_tc = re.search(r"\bG/\s*\d+\s*(?:;|,|\s)\s*d\s*\d+\b", desc, flags=re.I)
+        if m_tc:
+            time_control = re.sub(r"\s+", "", m_tc.group(0)).replace(",", ";").upper()
+
+        venue = ""
+        m_loc = re.search(r"\bLocation:\s*([^.;]+)", desc, flags=re.I)
+        if m_loc:
+            venue = m_loc.group(1).strip()
+
+        event_url = title_url.get(title.lower(), source["homepage"])
 
         out.append({
             "id": f"{source['id']}-{sanitize_slug(title)}-{startDate}",
             "name": title,
             "startDate": startDate,
             "endDate": endDate,
-            "city": city,
+            "city": city.title() if city.isupper() else city,
             "state": state,
-            "venue": "See source listing",
+            "venue": venue,
             "lat": 39.8283,
             "lon": -98.5795,
-            "format": "See source listing",
-            "entryFee": "See source listing",
+            "format": "",           # unknown unless parsed
+            "entryFee": entry_fee,
             "sections": [],
-            "timeControl": "See source listing",
+            "timeControl": time_control,
+            "organizer": organizer,
+            "description": desc[:800],
             "sourceId": source["id"],
-            "sourceUrl": source["homepage"],
+            "sourceUrl": event_url,
         })
+
+        i += 1
 
     return out
 
 
-
 # ----------------------------
-# Parser: Michess events
+# Parser: Michess (follow detail pages)
 # ----------------------------
 
-MONTHS_ABBR = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
-}
+def _parse_michess_date_range(line: str, title: str) -> tuple[str, str] | None:
+    """
+    Parses Michess detail/listing lines like:
+      'Fri, Feb 20 - Sun, Feb 22'
+      'Sat, Nov 22 - Sat, Nov 22'
+    These lines often omit the year; infer from title (common: includes 2026/2027),
+    otherwise infer from "closest future" relative to today.
+    """
+    s = re.sub(r"^Image\s*", "", line).strip()
+    m = re.match(r"^[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})\s*-\s*[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})$", s)
+    if not m:
+        return None
+
+    m1, d1, m2, d2 = m.group(1).lower(), int(m.group(2)), m.group(3).lower(), int(m.group(4))
+    mon1 = MONTHS_ABBR.get(m1)
+    mon2 = MONTHS_ABBR.get(m2)
+    if not mon1 or not mon2:
+        return None
+
+    # year inference
+    y = None
+    ym = re.search(r"\b(20\d{2})\b", title)
+    if ym:
+        y = int(ym.group(1))
+    else:
+        today = date.today()
+        y = today.year
+        # If month already "far behind", assume next year
+        if mon1 < today.month - 2:
+            y += 1
+
+    try:
+        start = date(y, mon1, d1)
+        end = date(y, mon2, d2)
+        if end < start:
+            end = start
+        return start.isoformat(), end.isoformat()
+    except ValueError:
+        return None
+
+
+def _michess_extract_detail_urls(listing_html: str, base_url: str) -> list[str]:
+    hrefs = set()
+    for href in re.findall(r'href="(/event-details/[^"]+)"', listing_html, flags=re.I):
+        hrefs.add(urljoin(base_url, href))
+    # Some pages may use full URLs already
+    for href in re.findall(r'href="(https?://www\.michess\.org/event-details/[^"]+)"', listing_html, flags=re.I):
+        hrefs.add(href)
+    return sorted(hrefs)
+
+
+def parse_michess_event_detail(detail_html: str, source: dict[str, Any], url: str) -> dict[str, Any] | None:
+    lines = _strip_html_to_lines(detail_html)
+
+    # Title is usually present as a strong line near top; easiest: find first non-generic title-ish line
+    title = ""
+    for ln in lines[:60]:
+        if ln.lower() in {"events", "event", "submit event"}:
+            continue
+        if len(ln) > 6 and "michigan chess association" not in ln.lower():
+            # the detail pages show the event title plainly (see examples) :contentReference[oaicite:9]{index=9}
+            title = ln.strip()
+            break
+    if not title:
+        return None
+
+    startDate = endDate = None
+    venue_line = ""
+    city = "Unknown"
+    state = "US"
+    fmt = ""
+    time_control = ""
+    entry_fee = ""
+
+    for ln in lines:
+        # date range line
+        if startDate is None:
+            dr = _parse_michess_date_range(ln, title)
+            if dr:
+                startDate, endDate = dr
+
+        # location line often like: 'Hyatt Regency ... Schaumburg, IL, 60423, United States' :contentReference[oaicite:10]{index=10}
+        if "United States" in ln and "," in ln and venue_line == "":
+            venue_line = re.sub(r"^Image\s*", "", ln).strip()
+            mloc = re.search(r"\b([A-Za-z .'-]+),\s*([A-Z]{2})\b", venue_line)
+            if mloc:
+                city = mloc.group(1).strip()
+                state = mloc.group(2).strip()
+
+        # Format:
+        if ln.strip().lower() == "format:":
+            # next non-empty line is often the format value
+            continue
+
+    # Try to pull "Format:" value by scanning around the "Format:" token
+    for idx, ln in enumerate(lines):
+        if ln.strip().lower() == "format:":
+            for j in range(idx + 1, min(idx + 6, len(lines))):
+                cand = lines[j].strip()
+                if cand and cand.lower() not in {"directions:", "notes:", "events"}:
+                    fmt = cand
+                    break
+            break
+
+    # Pull time control from format if it contains G/.. d..
+    if fmt:
+        m_tc = re.search(r"\bG/\s*\d+\s*(?:;|,|\s)\s*d\s*\d+\b", fmt, flags=re.I)
+        if m_tc:
+            time_control = re.sub(r"\s+", "", m_tc.group(0)).replace(",", ";").upper()
+
+    if not startDate:
+        return None
+
+    return {
+        "id": f"{source['id']}-{sanitize_slug(title)}-{startDate}",
+        "name": title,
+        "startDate": startDate,
+        "endDate": endDate or startDate,
+        "city": city,
+        "state": state,
+        "venue": venue_line,
+        "lat": 44.3148,
+        "lon": -85.6024,
+        "format": fmt,
+        "entryFee": entry_fee,
+        "sections": [],
+        "timeControl": time_control,
+        "sourceId": source["id"],
+        "sourceUrl": url,
+    }
+
 
 def parse_michess_events(listing_html: str, source: dict[str, Any]) -> list[dict[str, Any]]:
-    lines = _strip_html_to_lines(listing_html)
-
+    base = source["homepage"]
+    urls = _michess_extract_detail_urls(listing_html, base)
     out: list[dict[str, Any]] = []
 
-    # On the michess events page, each event appears as:
-    # "### Event Title"
-    # then nearby lines include:
-    # "Fri, Feb 20 - Sun, Feb 22"
-    # and a maps.google.com link text containing "... City, MI, ZIP, United States"
-    #
-    # Also: the page repeats event blocks (for the modal). We'll dedupe later.
+    # If the listing page didn't contain detail links, we can't proceed.
+    if not urls:
+        return out
 
-    for i in range(0, len(lines)):
-        if not lines[i].startswith("### "):
-            continue
-
-        title = lines[i].replace("### ", "").strip()
-        if len(title) < 6:
-            continue
-
-        # Search forward a bit for date range and location
-        startDate = endDate = None
-        city = "Unknown"
-        venue = "See source listing"
-
-        # look ahead up to 40 lines
-        for j in range(i, min(i + 40, len(lines))):
-            # date range
-            if startDate is None:
-                dr = _parse_michess_date_range(lines[j])
-                if dr:
-                    startDate, endDate = dr
-
-            # location line usually includes ", MI,"
-            if ", MI" in lines[j]:
-                # Grab city from "... City, MI"
-                mloc = re.search(r"\b([A-Za-z .'-]+),\s*MI\b", lines[j])
-                if mloc:
-                    city = mloc.group(1).strip()
-                venue = lines[j][:160]
-
-        # If we couldn't parse dates, skip (prevents junk)
-        if not startDate:
-            continue
-
-        out.append({
-            "id": f"{source['id']}-{sanitize_slug(title)}-{startDate}",
-            "name": title,
-            "startDate": startDate,
-            "endDate": endDate or startDate,
-            "city": city,
-            "state": "MI",
-            "venue": venue,
-            "lat": 44.3148,
-            "lon": -85.6024,
-            "format": "See source listing",
-            "entryFee": "See source listing",
-            "sections": [],
-            "timeControl": "See source listing",
-            "sourceId": source["id"],
-            "sourceUrl": source["homepage"],
-        })
+    for u in urls:
+        try:
+            detail_html = fetch_text(u)
+            ev = parse_michess_event_detail(detail_html, source, u)
+            if ev:
+                out.append(ev)
+        except Exception as e:
+            # don't kill entire run for one bad page
+            print(f"[michess] detail FAILED {u}: {e}")
 
     return out
 
@@ -366,15 +513,21 @@ def fetch_source(source: dict[str, Any]) -> list[dict[str, Any]]:
     parser = source["parser"]
 
     if parser == "uschess_upcoming":
-        # US Chess may paginate. Try a reasonable number of pages.
         events: list[dict[str, Any]] = []
-        for page in range(0, 40):
+        # US Chess uses ?page=0,1,2... (0-indexed) :contentReference[oaicite:11]{index=11}
+        for page in range(0, 60):
             url = source["endpoint"] if page == 0 else f"{source['endpoint']}?page={page}"
             html_text = fetch_text(url)
             page_events = parse_uschess_upcoming(html_text, source)
+
+            print(f"[uschess-upcoming] page={page} parsed={len(page_events)}")
+
+            # Stop once we hit an empty page after the first few
             if not page_events and page > 0:
                 break
+
             events.extend(page_events)
+
         return events
 
     if parser == "michess_events":
@@ -387,20 +540,15 @@ def fetch_source(source: dict[str, Any]) -> list[dict[str, Any]]:
 def main() -> None:
     all_events: list[dict[str, Any]] = []
 
-    # Helpful output for Actions logs (so you can see what’s working)
     for source in SOURCE_CATALOG:
         try:
             events = fetch_source(source)
             print(f"[{source['id']}] fetched {len(events)} raw events")
             all_events.extend(events)
         except Exception as e:
-            # Don’t hide failures during testing
             print(f"[{source['id']}] FAILED: {e}")
 
-    # Filter out past events
     all_events = [e for e in all_events if is_upcoming(e)]
-
-    # Dedupe
     all_events = dedupe(all_events)
 
     payload = {
