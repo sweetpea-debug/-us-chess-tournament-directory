@@ -81,10 +81,14 @@ function renderCards() {
     const node = ui.template.content.cloneNode(true);
     node.querySelector(".card__title").textContent = event.name || "Untitled tournament";
     node.querySelector(".card__dates").textContent = formatDateRange(event.startDate, event.endDate);
-    node.querySelector(".card__location").textContent = `${event.venue || "Venue TBD"} - ${event.city || "Unknown"}, ${
-      event.state || "US"
-    }`;
-    node.querySelector(".card__format").textContent = event.format || "See source listing";
+    const venue = (event.venue && event.venue !== "See source listing") ? event.venue : "";
+const format = (event.format && event.format !== "See source listing") ? event.format : "";
+const locLine = venue
+  ? `${venue} — ${event.city}, ${event.state}`
+  : `${event.city}, ${event.state}`;
+
+node.querySelector(".card__location").textContent = locLine;
+node.querySelector(".card__format").textContent = format || "";
 
     const chips = node.querySelector(".chips");
     // Only show distance chip (no source chip)
