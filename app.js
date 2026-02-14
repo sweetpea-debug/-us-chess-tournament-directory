@@ -30,7 +30,13 @@ const appState = {
   city: readStorage(CITY_KEY),
 };
 
+function safeSetText(node, text) {
+  if (node) node.textContent = text;
+}
+
 function renderStateFilter() {
+  if (!ui.stateFilter) return;
+
   ui.stateFilter.innerHTML = '<option value="all">All states</option>';
 
   stateList(appState.allEvents)
@@ -60,24 +66,29 @@ function computeVisibleEvents() {
 }
 
 function renderCards() {
+  if (!ui.cards || !ui.template) return;
+
   const events = computeVisibleEvents();
   ui.cards.innerHTML = "";
 
   if (events.length === 0) {
     ui.cards.innerHTML = '<p class="muted">No tournaments match your current filters.</p>';
+    safeSetText(ui.resultCount, "0 tournaments");
+    return;
   }
 
   events.forEach((event) => {
     const node = ui.template.content.cloneNode(true);
-    node.querySelector(".card__title").textContent = event.name;
+    node.querySelector(".card__title").textContent = event.name || "Untitled tournament";
     node.querySelector(".card__dates").textContent = formatDateRange(event.startDate, event.endDate);
-    node.querySelector(".card__location").textContent = `${event.venue} - ${event.city}, ${event.state}`;
-    node.querySelector(".card__format").textContent = event.format;
+    node.querySelector(".card__location").textContent = `${event.venue || "Venue TBD"} - ${event.city || "Unknown"}, ${
+      event.state || "US"
+    }`;
+    node.querySelector(".card__format").textContent = event.format || "See source listing";
 
     const chips = node.querySelector(".chips");
-
-    // Keep only distance chip (no source chips)
-    if (event.distance !== null) {
+    // Only show distance chip (no source chip)
+    if (event.distance !== null && Number.isFinite(event.distance)) {
       const distanceChip = document.createElement("span");
       distanceChip.className = "chip";
       distanceChip.textContent = `${event.distance.toFixed(1)} miles`;
@@ -92,11 +103,13 @@ function renderCards() {
     ui.cards.appendChild(node);
   });
 
-  ui.resultCount.textContent = `${events.length} tournament${events.length === 1 ? "" : "s"}`;
+  safeSetText(ui.resultCount, `${events.length} tournament${events.length === 1 ? "" : "s"}`);
 }
 
 function updateSyncLabel(iso) {
-  ui.syncLabel.textContent = `Last sync: ${new Date(iso).toLocaleString()}`;
+  if (!ui.syncLabel) return;
+  const dt = new Date(iso);
+  ui.syncLabel.textContent = `Last sync: ${Number.isNaN(dt.getTime()) ? "unknown" : dt.toLocaleString()}`;
 }
 
 function cacheIsFresh(cache) {
@@ -106,11 +119,16 @@ function cacheIsFresh(cache) {
 
 async function fetchPublishedEvents() {
   const cacheBuster = Date.now();
-  const response = await fetch(`events.json?v=${cacheBuster}`);
-  if (!response.ok) throw new Error("No published events.json yet");
+  const response = await fetch(`events.json?v=${cacheBuster}`, { cache: "no-store" });
+
+  if (!response.ok) {
+    throw new Error(`No published events.json yet (HTTP ${response.status})`);
+  }
 
   const payload = await response.json();
-  if (!Array.isArray(payload.events)) throw new Error("Invalid events.json payload");
+  if (!Array.isArray(payload.events)) {
+    throw new Error("Invalid events.json payload (missing events array)");
+  }
 
   return {
     events: payload.events,
@@ -124,7 +142,7 @@ async function loadEvents({ force = false } = {}) {
   if (!force && cacheIsFresh(cached)) {
     appState.allEvents = cached.events;
     updateSyncLabel(cached.syncedAt);
-    ui.statusMessage.textContent = "Loaded events from cached feed.";
+    safeSetText(ui.statusMessage, "Loaded events from cached data.");
     return;
   }
 
@@ -133,14 +151,16 @@ async function loadEvents({ force = false } = {}) {
     appState.allEvents = published.events;
     writeStorage(CACHE_KEY, published);
     updateSyncLabel(published.syncedAt);
-    ui.statusMessage.textContent = "Loaded events from daily published feed.";
-  } catch {
+    safeSetText(ui.statusMessage, "Loaded events from daily published feed.");
+  } catch (err) {
     const syncedAt = new Date().toISOString();
     const fallbackPayload = { events: FALLBACK_EVENTS, syncedAt };
     appState.allEvents = FALLBACK_EVENTS;
     writeStorage(CACHE_KEY, fallbackPayload);
     updateSyncLabel(syncedAt);
-    ui.statusMessage.textContent = "Using fallback dataset. Daily feed unavailable right now.";
+    safeSetText(ui.statusMessage, "Using fallback dataset. Daily feed unavailable right now.");
+    // Helpful for debugging if you open DevTools
+    console.warn("Falling back to local dataset:", err);
   }
 }
 
@@ -166,45 +186,45 @@ async function geocodeCity(value) {
 }
 
 function bind() {
-  ui.stateFilter.addEventListener("change", () => {
+  ui.stateFilter?.addEventListener("change", () => {
     appState.selectedState = ui.stateFilter.value;
     renderCards();
   });
 
-  ui.applyCity.addEventListener("click", async () => {
-    const city = ui.cityInput.value.trim();
+  ui.applyCity?.addEventListener("click", async () => {
+    const city = ui.cityInput?.value?.trim() || "";
     if (!city) {
-      ui.statusMessage.textContent = "Enter a city, for example: Denver, CO";
+      safeSetText(ui.statusMessage, "Enter a city, for example: Denver, CO");
       return;
     }
 
-    ui.statusMessage.textContent = "Resolving city…";
+    safeSetText(ui.statusMessage, "Resolving city…");
 
     try {
       const location = await geocodeCity(city);
       if (!location) {
-        ui.statusMessage.textContent = "City not found.";
+        safeSetText(ui.statusMessage, "City not found.");
         return;
       }
 
       appState.city = location;
       writeStorage(CITY_KEY, location);
-      ui.statusMessage.textContent = `Showing tournaments within ${SEARCH_RADIUS_MILES} miles of ${location.label}.`;
+      safeSetText(ui.statusMessage, `Showing tournaments within ${SEARCH_RADIUS_MILES} miles of ${location.label}.`);
       renderCards();
     } catch {
-      ui.statusMessage.textContent = "Could not geocode city right now. Try again shortly.";
+      safeSetText(ui.statusMessage, "Could not geocode city right now. Try again shortly.");
     }
   });
 
-  ui.clearCity.addEventListener("click", () => {
+  ui.clearCity?.addEventListener("click", () => {
     appState.city = null;
     localStorage.removeItem(CITY_KEY);
-    ui.cityInput.value = "";
-    ui.statusMessage.textContent = "City filter cleared.";
+    if (ui.cityInput) ui.cityInput.value = "";
+    safeSetText(ui.statusMessage, "City filter cleared.");
     renderCards();
   });
 
-  ui.refreshButton.addEventListener("click", async () => {
+  ui.refreshButton?.addEventListener("click", async () => {
     ui.refreshButton.disabled = true;
     ui.refreshButton.textContent = "Refreshing…";
 
@@ -218,13 +238,11 @@ function bind() {
 }
 
 async function init() {
-  // Mark booted early so your watchdog doesn't complain during slow network fetches
   window.__radarBooted = true;
-
   bind();
 
   if (appState.city?.label) {
-    ui.statusMessage.textContent = `Loaded saved city filter: ${appState.city.label}`;
+    safeSetText(ui.statusMessage, `Loaded saved city filter: ${appState.city.label}`);
   }
 
   await loadEvents();
