@@ -1,4 +1,4 @@
-import { FALLBACK_EVENTS, SOURCE_CATALOG } from "./data.js";
+import { FALLBACK_EVENTS } from "./data.js";
 import {
   CACHE_KEY,
   CACHE_TTL_MS,
@@ -17,7 +17,6 @@ const ui = {
   applyCity: document.getElementById("apply-city"),
   clearCity: document.getElementById("clear-city"),
   refreshButton: document.getElementById("refresh-button"),
-  sourceList: document.getElementById("source-list"),
   resultCount: document.getElementById("result-count"),
   syncLabel: document.getElementById("sync-label"),
   statusMessage: document.getElementById("status-message"),
@@ -30,25 +29,6 @@ const appState = {
   selectedState: "all",
   city: readStorage(CITY_KEY),
 };
-
-function sourceName(sourceId) {
-  return SOURCE_CATALOG.find((source) => source.id === sourceId)?.name ?? "Unknown source";
-}
-
-function renderSourceCatalog() {
-  // Sidebar sources list is optional; if removed from HTML, just do nothing.
-  if (!ui.sourceList) {
-    return;
-  }
-
-  ui.sourceList.innerHTML = "";
-
-  SOURCE_CATALOG.forEach((source) => {
-    const li = document.createElement("li");
-    li.innerHTML = `<a href="${source.homepage}" target="_blank" rel="noopener noreferrer">${source.name}</a> <span class="chip">${source.category}</span>`;
-    ui.sourceList.appendChild(li);
-  });
-}
 
 function renderStateFilter() {
   ui.stateFilter.innerHTML = '<option value="all">All states</option>';
@@ -69,10 +49,7 @@ function computeVisibleEvents() {
   return appState.allEvents
     .filter((event) => (appState.selectedState === "all" ? true : event.state === appState.selectedState))
     .map((event) => {
-      if (!appState.city) {
-        return { ...event, distance: null };
-      }
-
+      if (!appState.city) return { ...event, distance: null };
       return {
         ...event,
         distance: haversineMiles(appState.city.lat, appState.city.lon, event.lat, event.lon),
@@ -99,11 +76,7 @@ function renderCards() {
 
     const chips = node.querySelector(".chips");
 
-    const sourceChip = document.createElement("span");
-    sourceChip.className = "chip";
-    sourceChip.textContent = sourceName(event.sourceId);
-    chips.appendChild(sourceChip);
-
+    // Keep only distance chip (no source chips)
     if (event.distance !== null) {
       const distanceChip = document.createElement("span");
       distanceChip.className = "chip";
@@ -127,25 +100,17 @@ function updateSyncLabel(iso) {
 }
 
 function cacheIsFresh(cache) {
-  if (!cache?.syncedAt || !Array.isArray(cache.events)) {
-    return false;
-  }
-
+  if (!cache?.syncedAt || !Array.isArray(cache.events)) return false;
   return Date.now() - new Date(cache.syncedAt).getTime() < CACHE_TTL_MS;
 }
 
 async function fetchPublishedEvents() {
   const cacheBuster = Date.now();
   const response = await fetch(`events.json?v=${cacheBuster}`);
-
-  if (!response.ok) {
-    throw new Error("No published events.json yet");
-  }
+  if (!response.ok) throw new Error("No published events.json yet");
 
   const payload = await response.json();
-  if (!Array.isArray(payload.events)) {
-    throw new Error("Invalid events.json payload");
-  }
+  if (!Array.isArray(payload.events)) throw new Error("Invalid events.json payload");
 
   return {
     events: payload.events,
@@ -159,6 +124,7 @@ async function loadEvents({ force = false } = {}) {
   if (!force && cacheIsFresh(cached)) {
     appState.allEvents = cached.events;
     updateSyncLabel(cached.syncedAt);
+    ui.statusMessage.textContent = "Loaded events from cached feed.";
     return;
   }
 
@@ -187,14 +153,10 @@ async function geocodeCity(value) {
   });
 
   const response = await fetch(`https://nominatim.openstreetmap.org/search?${query.toString()}`);
-  if (!response.ok) {
-    throw new Error("Geocoder failed");
-  }
+  if (!response.ok) throw new Error("Geocoder failed");
 
   const rows = await response.json();
-  if (!rows.length) {
-    return null;
-  }
+  if (!rows.length) return null;
 
   return {
     label: rows[0].display_name,
@@ -256,8 +218,9 @@ function bind() {
 }
 
 async function init() {
+  // Mark booted early so your watchdog doesn't complain during slow network fetches
   window.__radarBooted = true;
-  renderSourceCatalog();
+
   bind();
 
   if (appState.city?.label) {
