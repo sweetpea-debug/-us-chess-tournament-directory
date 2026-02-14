@@ -1,187 +1,447 @@
 #!/usr/bin/env python3
-"""Daily ingest for US chess tournaments."""
+"""
+Daily ingest for chess tournaments.
+
+TEST MODE (as requested):
+- Only pulls from:
+  1) US Chess Upcoming Tournaments (new.uschess.org/upcoming-tournaments)
+  2) Michigan Chess Association events (michess.org/events + event details)
+- Emits only "real" events (must have a parseable date)
+- Filters out past events (endDate < today)
+- Writes events.json in repo root: { syncedAt, events }
+"""
 
 from __future__ import annotations
 
+import html
 import json
 import re
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-ROOT = Path(__file__).resolve().parents[1]
+
+# ----------------------------
+# Paths
+# ----------------------------
+
+HERE = Path(__file__).resolve()
+# If this file is scripts/build_events.py, repo root is parent of scripts/
+ROOT = HERE.parents[1] if HERE.parent.name == "scripts" else HERE.parent
 OUTPUT_PATH = ROOT / "events.json"
 
-SOURCE_CATALOG = [
+
+# ----------------------------
+# Sources (ONLY these two)
+# ----------------------------
+
+SOURCE_CATALOG: list[dict[str, Any]] = [
     {
-        "id": "uschess-tla",
-        "name": "US Chess Tournament Life Announcements",
-        "parser": "us_chess_wp",
-        "endpoint": "https://new.uschess.org/wp-json/wp/v2/posts?per_page=50&search=tournament",
-        "homepage": "https://new.uschess.org/tournaments",
+        "id": "uschess-upcoming",
+        "name": "US Chess Upcoming Tournaments",
+        "parser": "uschess_upcoming",
+        "endpoint": "https://new.uschess.org/upcoming-tournaments",
+        "homepage": "https://new.uschess.org/upcoming-tournaments",
     },
     {
-        "id": "uschess-events",
-        "name": "US Chess Events",
-        "parser": "us_chess_wp",
-        "endpoint": "https://new.uschess.org/wp-json/wp/v2/posts?per_page=50&search=event",
-        "homepage": "https://new.uschess.org/events",
-    },
-    {
-        "id": "fide-calendar",
-        "name": "FIDE Tournament Calendar",
-        "parser": "text_proxy",
-        "endpoint": "https://r.jina.ai/http://ratings.fide.com/tournament_calendar.phtml",
-        "homepage": "https://ratings.fide.com/tournament_calendar.phtml",
-    },
-    {
-        "id": "chessevents",
-        "name": "ChessEvents",
-        "parser": "text_proxy",
-        "endpoint": "https://r.jina.ai/http://chessevents.com",
-        "homepage": "https://chessevents.com",
-    },
-    {
-        "id": "chessresults",
-        "name": "Chess-Results",
-        "parser": "text_proxy",
-        "endpoint": "https://r.jina.ai/http://chess-results.com",
-        "homepage": "https://chess-results.com",
-    },
-    {
-        "id": "cca",
-        "name": "Continental Chess Association",
-        "parser": "text_proxy",
-        "endpoint": "https://r.jina.ai/http://www.continentalchess.com",
-        "homepage": "https://www.continentalchess.com",
-    },
-    {
-        "id": "charlotte",
-        "name": "Charlotte Chess Center",
-        "parser": "text_proxy",
-        "endpoint": "https://r.jina.ai/http://www.charlottechesscenter.org/events",
-        "homepage": "https://www.charlottechesscenter.org/events",
+        "id": "michess",
+        "name": "Michigan Chess Association",
+        "parser": "michess_events",
+        "endpoint": "https://www.michess.org/events",
+        "homepage": "https://www.michess.org/events",
     },
 ]
 
-FALLBACK_EVENTS = [
-    {"id": "world-open-2026", "name": "World Open", "startDate": "2026-06-30", "endDate": "2026-07-06", "city": "Philadelphia", "state": "PA", "venue": "Sheraton Philadelphia Downtown", "lat": 39.9583, "lon": -75.1638, "format": "9-round Swiss", "entryFee": "$429-$479", "sections": ["Open", "U2400", "U2200", "U2000", "U1800", "U1600"], "timeControl": "G/90;+30", "sourceId": "cca", "sourceUrl": "https://www.continentalchess.com/worldopen/"},
-    {"id": "national-open-2026", "name": "National Open", "startDate": "2026-06-03", "endDate": "2026-06-07", "city": "Las Vegas", "state": "NV", "venue": "Flamingo Las Vegas", "lat": 36.1162, "lon": -115.1701, "format": "6-round Swiss", "entryFee": "$180-$280", "sections": ["Open", "U2200", "U2000", "U1800", "U1600"], "timeControl": "G/90;+30", "sourceId": "vegas", "sourceUrl": "https://vegaschessfestival.com"},
-    {"id": "charlotte-open-2026", "name": "Charlotte Open", "startDate": "2026-08-06", "endDate": "2026-08-10", "city": "Charlotte", "state": "NC", "venue": "Le Meridien Charlotte", "lat": 35.2137, "lon": -80.8557, "format": "9-round Swiss", "entryFee": "$199-$259", "sections": ["Open", "U2300", "U2000", "U1700"], "timeControl": "G/90;+30", "sourceId": "charlotte", "sourceUrl": "https://www.charlottechesscenter.org/events"},
-    {"id": "us-championship-2026", "name": "US Championship", "startDate": "2026-10-01", "endDate": "2026-10-14", "city": "Saint Louis", "state": "MO", "venue": "Saint Louis Chess Club", "lat": 38.6365, "lon": -90.2618, "format": "Round robin", "entryFee": "Invitation only", "sections": ["Championship"], "timeControl": "Classical", "sourceId": "saintlouis", "sourceUrl": "https://www.uschesschamps.com"},
-    {"id": "texas-open-2026", "name": "Texas Open", "startDate": "2026-04-10", "endDate": "2026-04-12", "city": "Houston", "state": "TX", "venue": "Hyatt Regency Houston", "lat": 29.7604, "lon": -95.3698, "format": "5-round Swiss", "entryFee": "$95-$145", "sections": ["Open", "Reserve", "Novice"], "timeControl": "G/90;+30", "sourceId": "chessevents", "sourceUrl": "https://chessevents.com"},
 
-    {"id": "chicago-open-2026", "name": "Chicago Open", "startDate": "2026-05-21", "endDate": "2026-05-25", "city": "Wheeling", "state": "IL", "venue": "Westin Chicago North Shore", "lat": 42.1355, "lon": -87.9065, "format": "9-round Swiss", "entryFee": "$329-$399", "sections": ["Open", "U2300", "U2100", "U1900", "U1700"], "timeControl": "G/90;+30", "sourceId": "cca", "sourceUrl": "https://www.continentalchess.com/chicagoopen/"},
-    {"id": "us-amateur-team-east-2026", "name": "US Amateur Team East", "startDate": "2026-02-14", "endDate": "2026-02-16", "city": "Parsippany", "state": "NJ", "venue": "Parsippany Hilton", "lat": 40.857, "lon": -74.426, "format": "Team Swiss", "entryFee": "$180 per team", "sections": ["4-board teams"], "timeControl": "G/60;+5", "sourceId": "cca", "sourceUrl": "https://www.continentalchess.com"},
-    {"id": "bay-area-international-2026", "name": "Bay Area International", "startDate": "2026-01-03", "endDate": "2026-01-07", "city": "Santa Clara", "state": "CA", "venue": "Santa Clara Convention Center", "lat": 37.4034, "lon": -121.9717, "format": "Norm groups", "entryFee": "$350+", "sections": ["GM/IM norm groups"], "timeControl": "Classical", "sourceId": "chessevents", "sourceUrl": "https://chessevents.com"},
-    {"id": "marshall-gp-2026", "name": "Marshall Grand Prix", "startDate": "2026-03-07", "endDate": "2026-03-08", "city": "New York", "state": "NY", "venue": "Marshall Chess Club", "lat": 40.7298, "lon": -73.9973, "format": "5-round Swiss", "entryFee": "$85", "sections": ["Open"], "timeControl": "G/60;+10", "sourceId": "chessresults", "sourceUrl": "https://chess-results.com"},
-    {"id": "pacific-northwest-open-2026", "name": "Pacific Northwest Open", "startDate": "2026-07-17", "endDate": "2026-07-19", "city": "Bellevue", "state": "WA", "venue": "Hyatt Regency Bellevue", "lat": 47.615, "lon": -122.201, "format": "6-round Swiss", "entryFee": "$120-$180", "sections": ["Open", "U1800"], "timeControl": "G/90;+30", "sourceId": "chessctrl", "sourceUrl": "https://chessctrl.com"},
-]
+# ----------------------------
+# HTTP
+# ----------------------------
 
-TITLE_RE = re.compile(r"(open|championship|classic|festival|tournament)", re.IGNORECASE)
+DEFAULT_TIMEOUT_SECS = 25
+USER_AGENT = "Mozilla/5.0 (compatible; TournamentRadarBot/1.0; +https://github.com/)"
+
+def fetch_text(url: str) -> str:
+    """
+    Basic fetch helper. Raises on non-200 responses.
+    """
+    req = Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+        },
+    )
+    try:
+        with urlopen(req, timeout=DEFAULT_TIMEOUT_SECS) as resp:
+            raw = resp.read()
+            # Try UTF-8 first; fall back if needed.
+            try:
+                return raw.decode("utf-8", errors="replace")
+            except Exception:
+                return raw.decode(errors="replace")
+    except (HTTPError, URLError) as e:
+        raise RuntimeError(f"Fetch failed for {url}: {e}") from e
+
+
+# ----------------------------
+# Text extraction helpers
+# ----------------------------
+
+def _strip_html_to_lines(markup: str) -> list[str]:
+    """
+    Convert HTML into a list of cleaned text lines.
+    This is intentionally lightweight (no external deps).
+    """
+    # Drop scripts/styles
+    markup = re.sub(r"<script\b[^>]*>.*?</script>", " ", markup, flags=re.I | re.S)
+    markup = re.sub(r"<style\b[^>]*>.*?</style>", " ", markup, flags=re.I | re.S)
+
+    # Turn common block ends into newlines
+    markup = re.sub(r"</(p|div|li|h1|h2|h3|h4|tr|td|th|section|article|header|footer)\s*>", "\n", markup, flags=re.I)
+    markup = re.sub(r"<br\s*/?>", "\n", markup, flags=re.I)
+
+    # Drop remaining tags
+    text = re.sub(r"<[^>]+>", " ", markup)
+    text = html.unescape(text)
+
+    # Normalize whitespace into clean lines
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = re.sub(r"\s+", " ", raw).strip()
+        if line:
+            lines.append(line)
+    return lines
 
 
 def sanitize_slug(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    value = value.lower().strip()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    return value[:80] if value else "event"
 
 
-def fetch_text(url: str) -> str:
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urlopen(req, timeout=25) as response:
-        return response.read().decode("utf-8", errors="replace")
-
-
-def parse_text_proxy(text: str, source: dict[str, Any]) -> list[dict[str, Any]]:
-    rows = [line.strip() for line in text.splitlines() if line.strip()]
-    matches = [line for line in rows if TITLE_RE.search(line)]
+def dedupe(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Dedupe by (name + startDate + city + state) to avoid repeats.
+    Prefer the first occurrence.
+    """
+    seen: set[str] = set()
     out: list[dict[str, Any]] = []
-    for idx, line in enumerate(matches[:20]):
-        out.append(
-            {
-                "id": f"{source['id']}-live-{idx}-{sanitize_slug(line)[:60]}",
-                "name": line[:120],
-                "startDate": "2026-01-01",
-                "endDate": "2026-01-01",
-                "city": "Unknown",
-                "state": "US",
-                "venue": source["name"],
-                "lat": 39.8283,
-                "lon": -98.5795,
-                "format": "See source listing",
-                "entryFee": "See source listing",
-                "sections": [],
-                "timeControl": "See source listing",
-                "sourceId": source["id"],
-                "sourceUrl": source["homepage"],
-            }
-        )
+    for e in events:
+        key = f"{e.get('name','')}|{e.get('startDate','')}|{e.get('city','')}|{e.get('state','')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
     return out
 
 
-def parse_us_chess_wp(text: str, source: dict[str, Any]) -> list[dict[str, Any]]:
-    payload = json.loads(text)
+def is_upcoming(event: dict[str, Any]) -> bool:
+    """
+    Keep events that end today or later.
+    """
+    today = date.today().isoformat()
+    end_date = str(event.get("endDate") or "")
+    return bool(end_date) and end_date >= today
+
+
+# ----------------------------
+# US Chess date parsing
+# ----------------------------
+
+MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
+}
+
+def _parse_us_chess_date_one(s: str) -> date | None:
+    """
+    Parses: 'Wednesday, February 18, 2026' or 'February 18, 2026'
+    """
+    s = s.strip()
+    s = re.sub(r"^[A-Za-z]+,\s*", "", s)  # remove weekday if present
+    m = re.match(r"^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$", s)
+    if not m:
+        return None
+    mon = MONTHS.get(m.group(1).lower())
+    if not mon:
+        return None
+    day = int(m.group(2))
+    yr = int(m.group(3))
+    try:
+        return date(yr, mon, day)
+    except ValueError:
+        return None
+
+
+def _parse_us_chess_date_range(s: str) -> tuple[str, str] | None:
+    """
+    Parses date ranges like:
+      'Saturday, January 3, 2026 - Sunday, January 4, 2026'
+    or single dates like:
+      'Wednesday, February 18, 2026'
+    """
+    s = s.strip()
+    parts = [p.strip() for p in s.split(" - ")]
+    if not parts:
+        return None
+    start = _parse_us_chess_date_one(parts[0])
+    if not start:
+        return None
+    end = _parse_us_chess_date_one(parts[1]) if len(parts) > 1 else start
+    if not end:
+        end = start
+    return (start.isoformat(), end.isoformat())
+
+
+# ----------------------------
+# Parser: US Chess Upcoming Tournaments
+# ----------------------------
+
+def parse_uschess_upcoming(page_html: str, source: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Lightweight heuristic scrape for US Chess upcoming tournaments page.
+
+    This page may change layout; if it does, this parser may need adjustment.
+    """
+    lines = _strip_html_to_lines(page_html)
+
     out: list[dict[str, Any]] = []
-    for row in payload[:30]:
-        title_raw = row.get("title", {}).get("rendered", "")
-        title = re.sub(r"<[^>]*>", "", title_raw).strip()
+
+    # We look for a 3-line pattern:
+    #   Title
+    #   City, ST ...
+    #   Date line (parseable)
+    #
+    # This is intentionally conservative to avoid junk cards.
+    for i in range(0, len(lines) - 3):
+        title = lines[i].strip()
+        loc = lines[i + 1].strip()
+        date_line = lines[i + 2].strip()
+
+        # Filter obvious non-titles
+        if len(title) < 6:
+            continue
+        if title.lower() in {"upcoming tournaments", "tournaments", "events"}:
+            continue
+
+        loc_m = re.match(r"^(.+?),\s*([A-Z]{2})\b", loc)
+        dr = _parse_us_chess_date_range(date_line)
+
+        if not loc_m or not dr:
+            continue
+
+        city = loc_m.group(1).strip()
+        state = loc_m.group(2).strip()
+        startDate, endDate = dr
+
+        out.append({
+            "id": f"{source['id']}-{sanitize_slug(title)}-{startDate}",
+            "name": title,
+            "startDate": startDate,
+            "endDate": endDate,
+            "city": city,
+            "state": state,
+            "venue": "See source listing",
+            # No geocoding in this test. Use US centroid to avoid breaking distance filter.
+            "lat": 39.8283,
+            "lon": -98.5795,
+            "format": "See source listing",
+            "entryFee": "See source listing",
+            "sections": [],
+            "timeControl": "See source listing",
+            "sourceId": source["id"],
+            "sourceUrl": source["homepage"],
+        })
+
+    return out
+
+
+# ----------------------------
+# Parser: Michess events
+# ----------------------------
+
+MONTHS_ABBR = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
+}
+
+def _parse_michess_date_range(line: str) -> tuple[str, str] | None:
+    """
+    Attempts to parse lines like:
+      'Fri, Feb 20 - Sun, Feb 22'
+      'Sat, May 2 - Sat, May 2'
+    Michess list views sometimes omit the year; we assume current year,
+    and bump to next year if it looks far in the past.
+    """
+    # Normalize commas
+    s = line.strip()
+
+    # Pattern: "Fri, Feb 20 - Sun, Feb 22"
+    m = re.search(
+        r"\b[A-Za-z]{3},\s*([A-Za-z]{3,4})\s+(\d{1,2})\s*-\s*[A-Za-z]{3},\s*([A-Za-z]{3,4})\s+(\d{1,2})\b",
+        s
+    )
+    if not m:
+        return None
+
+    mon1 = MONTHS_ABBR.get(m.group(1).lower())
+    mon2 = MONTHS_ABBR.get(m.group(3).lower())
+    if not mon1 or not mon2:
+        return None
+
+    d1 = int(m.group(2))
+    d2 = int(m.group(4))
+
+    today = date.today()
+    y = today.year
+
+    try:
+        start = date(y, mon1, d1)
+        end = date(y, mon2, d2)
+    except ValueError:
+        return None
+
+    # If computed end is >30 days in the past, it probably means next year.
+    if end < today and (today - end).days > 30:
+        try:
+            start = date(y + 1, mon1, d1)
+            end = date(y + 1, mon2, d2)
+        except ValueError:
+            return None
+
+    return (start.isoformat(), end.isoformat())
+
+
+def parse_michess_events(listing_html: str, source: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Scrape michess.org/events by discovering event detail links,
+    then scraping each detail page for title/date/location.
+    """
+    # Find detail links
+    rel_links = sorted(set(re.findall(r'href="(/event-details/[^"]+)"', listing_html)))
+    detail_urls = ["https://www.michess.org" + rel for rel in rel_links]
+
+    out: list[dict[str, Any]] = []
+    for url in detail_urls[:250]:  # safety cap
+        try:
+            detail_html = fetch_text(url)
+        except Exception:
+            continue
+
+        lines = _strip_html_to_lines(detail_html)
+
+        # Title: take first meaningful line near top
+        title = None
+        for ln in lines[:60]:
+            low = ln.lower()
+            if low in {"events", "event details", "michigan chess association"}:
+                continue
+            if len(ln) >= 6:
+                title = ln
+                break
         if not title:
             continue
-        date = str(row.get("date", "2026-01-01"))[:10]
-        out.append(
-            {
-                "id": f"{source['id']}-{row.get('id', sanitize_slug(title))}",
-                "name": title,
-                "startDate": date,
-                "endDate": date,
-                "city": "Unknown",
-                "state": "US",
-                "venue": "US Chess listing",
-                "lat": 39.8283,
-                "lon": -98.5795,
-                "format": "See source listing",
-                "entryFee": "See source listing",
-                "sections": [],
-                "timeControl": "See source listing",
-                "sourceId": source["id"],
-                "sourceUrl": row.get("link") or source["homepage"],
-            }
-        )
+
+        # Date range: find first parseable range line
+        startDate = endDate = None
+        for ln in lines[:200]:
+            dr = _parse_michess_date_range(ln)
+            if dr:
+                startDate, endDate = dr
+                break
+
+        # If we can’t find dates, skip (don’t pollute feed)
+        if not startDate:
+            continue
+
+        # Location: attempt to find "... , MI"
+        city = "Unknown"
+        venue = "See source listing"
+        for ln in lines[:250]:
+            mloc = re.search(r"\b([A-Za-z .'-]+),\s*MI\b", ln)
+            if mloc:
+                city = mloc.group(1).strip()
+                venue = ln[:140]
+                break
+
+        out.append({
+            "id": f"{source['id']}-{sanitize_slug(title)}-{startDate}",
+            "name": title,
+            "startDate": startDate,
+            "endDate": endDate or startDate,
+            "city": city,
+            "state": "MI",
+            "venue": venue,
+            # Michigan centroid-ish; prevents distance filter from breaking.
+            "lat": 44.3148,
+            "lon": -85.6024,
+            "format": "See source listing",
+            "entryFee": "See source listing",
+            "sections": [],
+            "timeControl": "See source listing",
+            "sourceId": source["id"],
+            "sourceUrl": url,
+        })
+
     return out
 
 
+# ----------------------------
+# Orchestrator
+# ----------------------------
+
 def fetch_source(source: dict[str, Any]) -> list[dict[str, Any]]:
-    try:
-        text = fetch_text(source["endpoint"])
-        if source["parser"] == "us_chess_wp":
-            return parse_us_chess_wp(text, source)
-        return parse_text_proxy(text, source)
-    except Exception:
-        return []
+    parser = source["parser"]
 
+    if parser == "uschess_upcoming":
+        # US Chess may paginate. Try a reasonable number of pages.
+        events: list[dict[str, Any]] = []
+        for page in range(0, 40):
+            url = source["endpoint"] if page == 0 else f"{source['endpoint']}?page={page}"
+            html_text = fetch_text(url)
+            page_events = parse_uschess_upcoming(html_text, source)
+            if not page_events and page > 0:
+                break
+            events.extend(page_events)
+        return events
 
-def dedupe(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: dict[str, dict[str, Any]] = {}
-    for event in events:
-        key = f"{event['name']}|{event['startDate']}|{event['sourceId']}".lower()
-        seen.setdefault(key, event)
-    return list(seen.values())
+    if parser == "michess_events":
+        listing_html = fetch_text(source["endpoint"])
+        return parse_michess_events(listing_html, source)
+
+    return []
 
 
 def main() -> None:
-    live: list[dict[str, Any]] = []
-    for source in SOURCE_CATALOG:
-        live.extend(fetch_source(source))
+    all_events: list[dict[str, Any]] = []
 
-    events = dedupe(FALLBACK_EVENTS + live)
+    # Helpful output for Actions logs (so you can see what’s working)
+    for source in SOURCE_CATALOG:
+        try:
+            events = fetch_source(source)
+            print(f"[{source['id']}] fetched {len(events)} raw events")
+            all_events.extend(events)
+        except Exception as e:
+            # Don’t hide failures during testing
+            print(f"[{source['id']}] FAILED: {e}")
+
+    # Filter out past events
+    all_events = [e for e in all_events if is_upcoming(e)]
+
+    # Dedupe
+    all_events = dedupe(all_events)
+
     payload = {
         "syncedAt": datetime.now(timezone.utc).isoformat(),
-        "eventCount": len(events),
-        "events": events,
+        "events": all_events,
     }
 
     OUTPUT_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(f"Wrote {OUTPUT_PATH} with {len(events)} events")
+    print(f"Wrote {OUTPUT_PATH} with {len(all_events)} events")
 
 
 if __name__ == "__main__":
