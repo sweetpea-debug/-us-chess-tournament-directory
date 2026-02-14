@@ -36,6 +36,11 @@ function sourceName(sourceId) {
 }
 
 function renderSourceCatalog() {
+  // Sidebar sources list is optional; if removed from HTML, just do nothing.
+  if (!ui.sourceList) {
+    return;
+  }
+
   ui.sourceList.innerHTML = "";
 
   SOURCE_CATALOG.forEach((source) => {
