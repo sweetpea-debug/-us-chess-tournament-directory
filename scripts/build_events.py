@@ -152,6 +152,17 @@ def is_upcoming(event: dict[str, Any]) -> bool:
 # US Chess date parsing
 # ----------------------------
 
+US_STATE_ABBR = {
+    "alabama":"AL","alaska":"AK","arizona":"AZ","arkansas":"AR","california":"CA","colorado":"CO","connecticut":"CT",
+    "delaware":"DE","florida":"FL","georgia":"GA","hawaii":"HI","idaho":"ID","illinois":"IL","indiana":"IN",
+    "iowa":"IA","kansas":"KS","kentucky":"KY","louisiana":"LA","maine":"ME","maryland":"MD","massachusetts":"MA",
+    "michigan":"MI","minnesota":"MN","mississippi":"MS","missouri":"MO","montana":"MT","nebraska":"NE","nevada":"NV",
+    "new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND",
+    "ohio":"OH","oklahoma":"OK","oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC",
+    "south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT","virginia":"VA","washington":"WA",
+    "west virginia":"WV","wisconsin":"WI","wyoming":"WY","district of columbia":"DC",
+}
+
 MONTHS = {
     "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
     "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
@@ -202,40 +213,51 @@ def _parse_us_chess_date_range(s: str) -> tuple[str, str] | None:
 # ----------------------------
 
 def parse_uschess_upcoming(page_html: str, source: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Lightweight heuristic scrape for US Chess upcoming tournaments page.
-
-    This page may change layout; if it does, this parser may need adjustment.
-    """
     lines = _strip_html_to_lines(page_html)
 
     out: list[dict[str, Any]] = []
 
-    # We look for a 3-line pattern:
-    #   Title
-    #   City, ST ...
-    #   Date line (parseable)
+    def parse_location(loc: str) -> tuple[str, str] | None:
+        # Accept "City, ST" or "City, StateName"
+        m = re.match(r"^(.+?),\s*([A-Z]{2})\b", loc)
+        if m:
+            return (m.group(1).strip(), m.group(2).strip())
+
+        m2 = re.match(r"^(.+?),\s*([A-Za-z .'-]+)$", loc)
+        if not m2:
+            return None
+        city = m2.group(1).strip()
+        state_name = m2.group(2).strip().lower()
+        abbr = US_STATE_ABBR.get(state_name)
+        if not abbr:
+            return None
+        return (city, abbr)
+
+    # Pattern on the page is generally:
+    # Title
+    # City, StateName
+    # Date line
+    # Organizer
     #
-    # This is intentionally conservative to avoid junk cards.
-    for i in range(0, len(lines) - 3):
+    # We'll scan for that.
+    for i in range(0, len(lines) - 4):
         title = lines[i].strip()
         loc = lines[i + 1].strip()
         date_line = lines[i + 2].strip()
 
-        # Filter obvious non-titles
+        # Basic title sanity
         if len(title) < 6:
             continue
         if title.lower() in {"upcoming tournaments", "tournaments", "events"}:
             continue
 
-        loc_m = re.match(r"^(.+?),\s*([A-Z]{2})\b", loc)
+        loc_parsed = parse_location(loc)
         dr = _parse_us_chess_date_range(date_line)
 
-        if not loc_m or not dr:
+        if not loc_parsed or not dr:
             continue
 
-        city = loc_m.group(1).strip()
-        state = loc_m.group(2).strip()
+        city, state = loc_parsed
         startDate, endDate = dr
 
         out.append({
@@ -246,7 +268,6 @@ def parse_uschess_upcoming(page_html: str, source: dict[str, Any]) -> list[dict[
             "city": city,
             "state": state,
             "venue": "See source listing",
-            # No geocoding in this test. Use US centroid to avoid breaking distance filter.
             "lat": 39.8283,
             "lon": -98.5795,
             "format": "See source listing",
@@ -260,6 +281,7 @@ def parse_uschess_upcoming(page_html: str, source: dict[str, Any]) -> list[dict[
     return out
 
 
+
 # ----------------------------
 # Parser: Michess events
 # ----------------------------
@@ -269,104 +291,51 @@ MONTHS_ABBR = {
     "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
 }
 
-def _parse_michess_date_range(line: str) -> tuple[str, str] | None:
-    """
-    Attempts to parse lines like:
-      'Fri, Feb 20 - Sun, Feb 22'
-      'Sat, May 2 - Sat, May 2'
-    Michess list views sometimes omit the year; we assume current year,
-    and bump to next year if it looks far in the past.
-    """
-    # Normalize commas
-    s = line.strip()
-
-    # Pattern: "Fri, Feb 20 - Sun, Feb 22"
-    m = re.search(
-        r"\b[A-Za-z]{3},\s*([A-Za-z]{3,4})\s+(\d{1,2})\s*-\s*[A-Za-z]{3},\s*([A-Za-z]{3,4})\s+(\d{1,2})\b",
-        s
-    )
-    if not m:
-        return None
-
-    mon1 = MONTHS_ABBR.get(m.group(1).lower())
-    mon2 = MONTHS_ABBR.get(m.group(3).lower())
-    if not mon1 or not mon2:
-        return None
-
-    d1 = int(m.group(2))
-    d2 = int(m.group(4))
-
-    today = date.today()
-    y = today.year
-
-    try:
-        start = date(y, mon1, d1)
-        end = date(y, mon2, d2)
-    except ValueError:
-        return None
-
-    # If computed end is >30 days in the past, it probably means next year.
-    if end < today and (today - end).days > 30:
-        try:
-            start = date(y + 1, mon1, d1)
-            end = date(y + 1, mon2, d2)
-        except ValueError:
-            return None
-
-    return (start.isoformat(), end.isoformat())
-
-
 def parse_michess_events(listing_html: str, source: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Scrape michess.org/events by discovering event detail links,
-    then scraping each detail page for title/date/location.
-    """
-    # Find detail links
-    rel_links = sorted(set(re.findall(r'href="(/event-details/[^"]+)"', listing_html)))
-    detail_urls = ["https://www.michess.org" + rel for rel in rel_links]
+    lines = _strip_html_to_lines(listing_html)
 
     out: list[dict[str, Any]] = []
-    for url in detail_urls[:250]:  # safety cap
-        try:
-            detail_html = fetch_text(url)
-        except Exception:
+
+    # On the michess events page, each event appears as:
+    # "### Event Title"
+    # then nearby lines include:
+    # "Fri, Feb 20 - Sun, Feb 22"
+    # and a maps.google.com link text containing "... City, MI, ZIP, United States"
+    #
+    # Also: the page repeats event blocks (for the modal). We'll dedupe later.
+
+    for i in range(0, len(lines)):
+        if not lines[i].startswith("### "):
             continue
 
-        lines = _strip_html_to_lines(detail_html)
-
-        # Title: take first meaningful line near top
-        title = None
-        for ln in lines[:60]:
-            low = ln.lower()
-            if low in {"events", "event details", "michigan chess association"}:
-                continue
-            if len(ln) >= 6:
-                title = ln
-                break
-        if not title:
+        title = lines[i].replace("### ", "").strip()
+        if len(title) < 6:
             continue
 
-        # Date range: find first parseable range line
+        # Search forward a bit for date range and location
         startDate = endDate = None
-        for ln in lines[:200]:
-            dr = _parse_michess_date_range(ln)
-            if dr:
-                startDate, endDate = dr
-                break
-
-        # If we can’t find dates, skip (don’t pollute feed)
-        if not startDate:
-            continue
-
-        # Location: attempt to find "... , MI"
         city = "Unknown"
         venue = "See source listing"
-        for ln in lines[:250]:
-            mloc = re.search(r"\b([A-Za-z .'-]+),\s*MI\b", ln)
-            if mloc:
-                city = mloc.group(1).strip()
-                venue = ln[:140]
-                break
+
+        # look ahead up to 40 lines
+        for j in range(i, min(i + 40, len(lines))):
+            # date range
+            if startDate is None:
+                dr = _parse_michess_date_range(lines[j])
+                if dr:
+                    startDate, endDate = dr
+
+            # location line usually includes ", MI,"
+            if ", MI" in lines[j]:
+                # Grab city from "... City, MI"
+                mloc = re.search(r"\b([A-Za-z .'-]+),\s*MI\b", lines[j])
+                if mloc:
+                    city = mloc.group(1).strip()
+                venue = lines[j][:160]
+
+        # If we couldn't parse dates, skip (prevents junk)
+        if not startDate:
+            continue
 
         out.append({
             "id": f"{source['id']}-{sanitize_slug(title)}-{startDate}",
@@ -376,7 +345,6 @@ def parse_michess_events(listing_html: str, source: dict[str, Any]) -> list[dict
             "city": city,
             "state": "MI",
             "venue": venue,
-            # Michigan centroid-ish; prevents distance filter from breaking.
             "lat": 44.3148,
             "lon": -85.6024,
             "format": "See source listing",
@@ -384,7 +352,7 @@ def parse_michess_events(listing_html: str, source: dict[str, Any]) -> list[dict
             "sections": [],
             "timeControl": "See source listing",
             "sourceId": source["id"],
-            "sourceUrl": url,
+            "sourceUrl": source["homepage"],
         })
 
     return out
