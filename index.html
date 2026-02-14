@@ -26,38 +26,40 @@
       </div>
     </header>
 
-    <main class="container layout">
-      <aside class="panel" aria-label="Filters">
-        <h2>Filters</h2>
+<main class="container layout">
+  <aside class="panel" aria-label="Filters">
+    <h2>Filters</h2>
 
-        <label class="field" for="state-filter">
-          <span>US state</span>
-          <select id="state-filter">
-            <option value="all">All states</option>
-          </select>
-        </label>
+    <label class="field" for="state-filter">
+      <span>US state</span>
+      <select id="state-filter">
+        <option value="all">All states</option>
+      </select>
+    </label>
 
-        <label class="field" for="city-input">
-          <span>Within 100 miles of city</span>
-          <input id="city-input" type="text" placeholder="Dallas, TX" autocomplete="off" />
-        </label>
+    <label class="field" for="city-input">
+      <span>Within 100 miles of city</span>
+      <input id="city-input" type="text" placeholder="Dallas, TX" autocomplete="off" />
+    </label>
 
-        <div class="row">
-          <button id="apply-city" type="button" class="btn">Apply</button>
-          <button id="clear-city" type="button" class="btn btn--secondary">Clear</button>
-        </div>
+    <div class="row">
+      <button id="apply-city" type="button" class="btn">Apply</button>
+      <button id="clear-city" type="button" class="btn btn--secondary">Clear</button>
+    </div>
 
-        <p id="status-message" class="muted" aria-live="polite"></p>
+    <p id="status-message" class="muted" aria-live="polite"></p>
+  </aside>
 
-      <section class="panel" aria-label="Tournament results">
-        <div class="results-head">
-          <h2>Tournaments</h2>
-          <p id="result-count" class="muted">Waiting for data…</p>
-        </div>
+  <section class="panel" aria-label="Tournament results">
+    <div class="results-head">
+      <h2>Tournaments</h2>
+      <p id="result-count" class="muted">Waiting for data…</p>
+    </div>
 
-        <div id="cards" class="cards"></div>
-      </section>
-    </main>
+    <div id="cards" class="cards"></div>
+  </section>
+</main>
+
 
     <template id="card-template">
       <article class="card">
