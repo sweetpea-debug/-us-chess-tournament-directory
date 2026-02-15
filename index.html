@@ -6,7 +6,7 @@
     <title>US Chess Tournament Radar</title>
     <meta
       name="description"
-      content="Daily-updating United States chess tournament directory with source aggregation, state filters, and 100-mile city search."
+      content="Daily-updating United States chess tournament directory with state filters and 100-mile city search."
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -16,8 +16,7 @@
         <p class="hero__eyebrow">UNITED STATES CHESS TOURNAMENT RADAR</p>
         <h1>Find tournaments across the United States</h1>
         <p class="hero__subtitle">
-          Aggregated from federation calendars, organizer pages, and event platforms. Data refreshes
-          every 24 hours.
+          Aggregated from federation calendars and organizer pages. Data refreshes every 24 hours.
         </p>
         <div class="hero__meta">
           <span id="sync-label">Last sync: never</span>
@@ -26,40 +25,39 @@
       </div>
     </header>
 
-<main class="container layout">
-  <aside class="panel" aria-label="Filters">
-    <h2>Filters</h2>
+    <main class="container layout">
+      <aside class="panel" aria-label="Filters">
+        <h2>Filters</h2>
 
-    <label class="field" for="state-filter">
-      <span>US state</span>
-      <select id="state-filter">
-        <option value="all">All states</option>
-      </select>
-    </label>
+        <label class="field" for="state-filter">
+          <span>US state</span>
+          <select id="state-filter">
+            <option value="all">All states</option>
+          </select>
+        </label>
 
-    <label class="field" for="city-input">
-      <span>Within 100 miles of city</span>
-      <input id="city-input" type="text" placeholder="Dallas, TX" autocomplete="off" />
-    </label>
+        <label class="field" for="city-input">
+          <span>Within 100 miles of city</span>
+          <input id="city-input" type="text" placeholder="Dallas, TX" autocomplete="off" />
+        </label>
 
-    <div class="row">
-      <button id="apply-city" type="button" class="btn">Apply</button>
-      <button id="clear-city" type="button" class="btn btn--secondary">Clear</button>
-    </div>
+        <div class="row">
+          <button id="apply-city" type="button" class="btn">Apply</button>
+          <button id="clear-city" type="button" class="btn btn--secondary">Clear</button>
+        </div>
 
-    <p id="status-message" class="muted" aria-live="polite"></p>
-  </aside>
+        <p id="status-message" class="muted" aria-live="polite"></p>
+      </aside>
 
-  <section class="panel" aria-label="Tournament results">
-    <div class="results-head">
-      <h2>Tournaments</h2>
-      <p id="result-count" class="muted">Waiting for data…</p>
-    </div>
+      <section class="panel" aria-label="Tournament results">
+        <div class="results-head">
+          <h2>Tournaments</h2>
+          <p id="result-count" class="muted">Waiting for data…</p>
+        </div>
 
-    <div id="cards" class="cards"></div>
-  </section>
-</main>
-
+        <div id="cards" class="cards"></div>
+      </section>
+    </main>
 
     <template id="card-template">
       <article class="card">
@@ -82,13 +80,15 @@
         const cards = document.getElementById("cards");
 
         if (status) {
-          status.textContent = "The app script did not load. Re-copy app.js, data.js, and utils.js as full files.";
+          status.textContent =
+            "The app script did not load. Re-copy app.js, data.js, and utils.js as full files (no markdown).";
         }
         if (resultCount) {
           resultCount.textContent = "Data did not load";
         }
         if (cards && !cards.children.length) {
-          cards.innerHTML = '<p class="muted">No cards rendered yet. This usually means one JS file was pasted with extra markdown text.</p>';
+          cards.innerHTML =
+            '<p class="muted">No cards rendered yet. This usually means one JS file was pasted with extra markdown text.</p>';
         }
       }, 2500);
 
@@ -110,18 +110,8 @@
           cards.innerHTML = `<p class="muted">Startup failed: ${event.message || "Unknown JavaScript error"}</p>`;
         }
       });
-
-      const moduleScript = document.getElementById("app-module");
-      if (moduleScript) {
-        moduleScript.addEventListener("error", () => {
-          if (window.__radarBooted) return;
-          const status = document.getElementById("status-message");
-          if (status) {
-            status.textContent = "Could not load app.js. Confirm app.js exists in repo root and has no extra markdown/citation text.";
-          }
-        });
-      }
     </script>
-    <script type="module" src="app.js" id="app-module"></script>
+
+    <script type="module" src="app.js"></script>
   </body>
 </html>
