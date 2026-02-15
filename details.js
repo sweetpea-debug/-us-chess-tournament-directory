@@ -1,11 +1,6 @@
-import { SOURCE_CATALOG } from "./data.js";
 import { formatDateRange } from "./utils.js";
 
 const detailsRoot = document.getElementById("details");
-
-function resolveSource(sourceId) {
-  return SOURCE_CATALOG.find((source) => source.id === sourceId);
-}
 
 function missingView() {
   detailsRoot.innerHTML = `
@@ -21,8 +16,6 @@ function line(label, value) {
 }
 
 function renderTournament(event) {
-  const source = resolveSource(event.sourceId);
-
   const sectionsText =
     Array.isArray(event.sections) && event.sections.length ? event.sections.join(", ") : "";
 
@@ -30,14 +23,13 @@ function renderTournament(event) {
     <h1>${event.name}</h1>
 
     ${line("Dates", formatDateRange(event.startDate, event.endDate))}
-    ${line("Location", `${event.city}, ${event.state}`)}
+    ${line("Location", `${event.city || "Unknown"}, ${event.state || "US"}`)}
     ${line("Venue", event.venue)}
 
     ${line("Time control", event.timeControl)}
     ${line("Sections", sectionsText)}
     ${line("Entry fee", event.entryFee)}
 
-    ${line("Source", source?.name || "Unknown source")}
     <p><a href="${event.sourceUrl}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
   `;
 }
@@ -58,6 +50,7 @@ function init() {
       missingView();
       return;
     }
+
     renderTournament(event);
   } catch {
     missingView();
