@@ -1,22 +1,49 @@
-export const CACHE_KEY = "us-chess-radar-events-v1";
-export const CITY_KEY = "us-chess-radar-city-v1";
-export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+export const CACHE_KEY = "usChessRadarCacheV1";
+export const CITY_KEY = "usChessRadarCityV1";
+
+export const CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
 export const SEARCH_RADIUS_MILES = 100;
 
-export function formatDateRange(startDate, endDate) {
-  const options = { month: "short", day: "numeric", year: "numeric" };
-  const startIso = String(startDate || "").slice(0, 10);
-  const endIso = String(endDate || "").slice(0, 10);
+export function readStorage(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
-  const start = new Date(startIso).toLocaleDateString(undefined, options);
-  const end = new Date(endIso).toLocaleDateString(undefined, options);
+export function writeStorage(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore quota errors
+  }
+}
 
-  // Single-day event -> show only one date
-  if (startIso && endIso && startIso === endIso) {
+export function formatDate(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+export function formatDateRange(startIso, endIso) {
+  const start = formatDate(startIso);
+  const end = formatDate(endIso);
+
+  if (!start) return "";
+  if (!end) return start;
+
+  // same day -> show single date
+  if (String(startIso).slice(0, 10) === String(endIso).slice(0, 10)) {
     return start;
   }
 
   return `${start} - ${end}`;
+}
+
+function toRadians(deg) {
+  return (deg * Math.PI) / 180;
 }
 
 export function haversineMiles(lat1, lon1, lat2, lon2) {
@@ -25,37 +52,24 @@ export function haversineMiles(lat1, lon1, lat2, lon2) {
   const c = Number(lat2);
   const d = Number(lon2);
 
-  if (![a, b, c, d].every((n) => Number.isFinite(n))) {
-    return null;
-  }
+  if (![a, b, c, d].every((x) => Number.isFinite(x))) return NaN;
 
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const R = 3958.8;
-  const dLat = toRad(c - a);
-  const dLon = toRad(d - b);
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a)) * Math.cos(toRad(c)) * Math.sin(dLon / 2) ** 2;
+  const R = 3958.8; // miles
+  const dLat = toRadians(c - a);
+  const dLon = toRadians(d - b);
 
-  return 2 * R * Math.asin(Math.sqrt(x));
-}
+  const s1 = Math.sin(dLat / 2) ** 2;
+  const s2 = Math.cos(toRadians(a)) * Math.cos(toRadians(c)) * Math.sin(dLon / 2) ** 2;
 
-export function readStorage(key) {
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function writeStorage(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  const h = s1 + s2;
+  const dist = 2 * R * Math.asin(Math.sqrt(h));
+  return dist;
 }
 
 export function stateList(events) {
-  return [...new Set((events || []).map((event) => event.state))]
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
+  const states = new Set();
+  (events || []).forEach((e) => {
+    if (e && e.state) states.add(e.state);
+  });
+  return Array.from(states).sort();
 }
