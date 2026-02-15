@@ -1,255 +1,69 @@
-export const SOURCE_CATALOG = [
-  {
-    id: "uschess-tla",
-    name: "US Chess Tournament Life Announcements",
-    category: "Federation",
-    homepage: "https://new.uschess.org/tournaments",
-    parser: "usChessWordpress",
-    endpoint: "https://new.uschess.org/wp-json/wp/v2/posts?per_page=50&search=tournament",
-  },
-  {
-    id: "uschess-events",
-    name: "US Chess Events",
-    category: "Federation",
-    homepage: "https://new.uschess.org/events",
-    parser: "usChessWordpress",
-    endpoint: "https://new.uschess.org/wp-json/wp/v2/posts?per_page=50&search=event",
-  },
-  {
-    id: "fide-calendar",
-    name: "FIDE Tournament Calendar",
-    category: "Federation",
-    homepage: "https://ratings.fide.com/tournament_calendar.phtml",
-    parser: "htmlFeed",
-    endpoint: "https://r.jina.ai/http://ratings.fide.com/tournament_calendar.phtml",
-  },
-  {
-    id: "chessevents",
-    name: "ChessEvents",
-    category: "Aggregator",
-    homepage: "https://chessevents.com",
-    parser: "htmlFeed",
-    endpoint: "https://r.jina.ai/http://chessevents.com",
-  },
-  {
-    id: "chessresults",
-    name: "Chess-Results",
-    category: "Aggregator",
-    homepage: "https://chess-results.com",
-    parser: "htmlFeed",
-    endpoint: "https://r.jina.ai/http://chess-results.com",
-  },
-  {
-    id: "cca",
-    name: "Continental Chess Association",
-    category: "Organizer",
-    homepage: "https://www.continentalchess.com",
-    parser: "htmlFeed",
-    endpoint: "https://r.jina.ai/http://www.continentalchess.com",
-  },
-  {
-    id: "charlotte",
-    name: "Charlotte Chess Center",
-    category: "Organizer",
-    homepage: "https://www.charlottechesscenter.org/events",
-    parser: "htmlFeed",
-    endpoint: "https://r.jina.ai/http://www.charlottechesscenter.org/events",
-  },
-  {
-    id: "saintlouis",
-    name: "Saint Louis Chess Club",
-    category: "Organizer",
-    homepage: "https://www.uschesschamps.com",
-    parser: "htmlFeed",
-    endpoint: "https://r.jina.ai/http://www.uschesschamps.com",
-  },
-  {
-    id: "vegas",
-    name: "Vegas Chess Festival",
-    category: "Organizer",
-    homepage: "https://vegaschessfestival.com",
-    parser: "htmlFeed",
-    endpoint: "https://r.jina.ai/http://vegaschessfestival.com",
-  },
-  {
-    id: "chessctrl",
-    name: "Chess Control",
-    category: "Organizer",
-    homepage: "https://chessctrl.com",
-    parser: "htmlFeed",
-    endpoint: "https://r.jina.ai/http://chessctrl.com",
-  },
-];
+import { SOURCE_CATALOG } from "./data.js";
+import { formatDateRange } from "./utils.js";
 
-export const FALLBACK_EVENTS = [
-  {
-    id: "world-open-2026",
-    name: "World Open",
-    startDate: "2026-06-30",
-    endDate: "2026-07-06",
-    city: "Philadelphia",
-    state: "PA",
-    venue: "Sheraton Philadelphia Downtown",
-    lat: 39.9583,
-    lon: -75.1638,
-    format: "9-round Swiss",
-    entryFee: "$429-$479",
-    sections: ["Open", "U2400", "U2200", "U2000", "U1800", "U1600"],
-    timeControl: "G/90;+30",
-    sourceId: "cca",
-    sourceUrl: "https://www.continentalchess.com/worldopen/",
-  },
-  {
-    id: "national-open-2026",
-    name: "National Open",
-    startDate: "2026-06-03",
-    endDate: "2026-06-07",
-    city: "Las Vegas",
-    state: "NV",
-    venue: "Flamingo Las Vegas",
-    lat: 36.1162,
-    lon: -115.1701,
-    format: "6-round Swiss",
-    entryFee: "$180-$280",
-    sections: ["Open", "U2200", "U2000", "U1800", "U1600"],
-    timeControl: "G/90;+30",
-    sourceId: "vegas",
-    sourceUrl: "https://vegaschessfestival.com",
-  },
-  {
-    id: "charlotte-open-2026",
-    name: "Charlotte Open",
-    startDate: "2026-08-06",
-    endDate: "2026-08-10",
-    city: "Charlotte",
-    state: "NC",
-    venue: "Le Meridien Charlotte",
-    lat: 35.2137,
-    lon: -80.8557,
-    format: "9-round Swiss",
-    entryFee: "$199-$259",
-    sections: ["Open", "U2300", "U2000", "U1700"],
-    timeControl: "G/90;+30",
-    sourceId: "charlotte",
-    sourceUrl: "https://www.charlottechesscenter.org/events",
-  },
-  {
-    id: "chicago-open-2026",
-    name: "Chicago Open",
-    startDate: "2026-05-21",
-    endDate: "2026-05-25",
-    city: "Wheeling",
-    state: "IL",
-    venue: "Westin Chicago North Shore",
-    lat: 42.1355,
-    lon: -87.9065,
-    format: "9-round Swiss",
-    entryFee: "$329-$399",
-    sections: ["Open", "U2300", "U2100", "U1900", "U1700"],
-    timeControl: "G/90;+30",
-    sourceId: "cca",
-    sourceUrl: "https://www.continentalchess.com/chicagoopen/",
-  },
-  {
-    id: "us-amateur-team-east-2026",
-    name: "US Amateur Team East",
-    startDate: "2026-02-14",
-    endDate: "2026-02-16",
-    city: "Parsippany",
-    state: "NJ",
-    venue: "Parsippany Hilton",
-    lat: 40.857,
-    lon: -74.426,
-    format: "Team Swiss",
-    entryFee: "$180 per team",
-    sections: ["4-board teams"],
-    timeControl: "G/60;+5",
-    sourceId: "cca",
-    sourceUrl: "https://www.continentalchess.com",
-  },
-  {
-    id: "us-championship-2026",
-    name: "US Championship",
-    startDate: "2026-10-01",
-    endDate: "2026-10-14",
-    city: "Saint Louis",
-    state: "MO",
-    venue: "Saint Louis Chess Club",
-    lat: 38.6365,
-    lon: -90.2618,
-    format: "Round robin",
-    entryFee: "Invitation only",
-    sections: ["Championship"],
-    timeControl: "Classical",
-    sourceId: "saintlouis",
-    sourceUrl: "https://www.uschesschamps.com",
-  },
-  {
-    id: "texas-open-2026",
-    name: "Texas Open",
-    startDate: "2026-04-10",
-    endDate: "2026-04-12",
-    city: "Houston",
-    state: "TX",
-    venue: "Hyatt Regency Houston",
-    lat: 29.7604,
-    lon: -95.3698,
-    format: "5-round Swiss",
-    entryFee: "$95-$145",
-    sections: ["Open", "Reserve", "Novice"],
-    timeControl: "G/90;+30",
-    sourceId: "chessevents",
-    sourceUrl: "https://chessevents.com",
-  },
-  {
-    id: "bay-area-international-2026",
-    name: "Bay Area International",
-    startDate: "2026-01-03",
-    endDate: "2026-01-07",
-    city: "Santa Clara",
-    state: "CA",
-    venue: "Santa Clara Convention Center",
-    lat: 37.4034,
-    lon: -121.9717,
-    format: "Norm groups",
-    entryFee: "$350+",
-    sections: ["GM/IM norm groups"],
-    timeControl: "Classical",
-    sourceId: "chessevents",
-    sourceUrl: "https://chessevents.com",
-  },
-  {
-    id: "marshall-gp-2026",
-    name: "Marshall Grand Prix",
-    startDate: "2026-03-07",
-    endDate: "2026-03-08",
-    city: "New York",
-    state: "NY",
-    venue: "Marshall Chess Club",
-    lat: 40.7298,
-    lon: -73.9973,
-    format: "5-round Swiss",
-    entryFee: "$85",
-    sections: ["Open"],
-    timeControl: "G/60;+10",
-    sourceId: "chessresults",
-    sourceUrl: "https://chess-results.com",
-  },
-  {
-    id: "pacific-northwest-open-2026",
-    name: "Pacific Northwest Open",
-    startDate: "2026-07-17",
-    endDate: "2026-07-19",
-    city: "Bellevue",
-    state: "WA",
-    venue: "Hyatt Regency Bellevue",
-    lat: 47.615,
-    lon: -122.201,
-    format: "6-round Swiss",
-    entryFee: "$120-$180",
-    sections: ["Open", "U1800"],
-    timeControl: "G/90;+30",
-    sourceId: "chessctrl",
-    sourceUrl: "https://chessctrl.com",
-  },
-];
+const detailsRoot = document.getElementById("details");
+
+function resolveSource(sourceId) {
+  return SOURCE_CATALOG.find((source) => source.id === sourceId);
+}
+
+function missingView() {
+  detailsRoot.innerHTML = `
+    <h1>Tournament not found</h1>
+    <p class="muted">Return to the main page and open a tournament card again.</p>
+  `;
+}
+
+function line(label, value) {
+  if (!value) return "";
+  return `<p><strong>${label}:</strong> ${value}</p>`;
+}
+
+function renderTournament(event) {
+  const source = resolveSource(event.sourceId);
+
+  const sectionsText =
+    Array.isArray(event.sections) && event.sections.length
+      ? event.sections.join(", ")
+      : "";
+
+  detailsRoot.innerHTML = `
+    <h1>${event.name}</h1>
+
+    ${line("Dates", formatDateRange(event.startDate, event.endDate))}
+    ${line("Location", `${event.city}, ${event.state}`)}
+    ${line("Venue", event.venue)}
+
+    ${line("Time control", event.timeControl)}
+    ${line("Sections", sectionsText)}
+    ${line("Entry fee", event.entryFee)}
+
+    ${line("Source", source?.name || "Unknown source")}
+    <p><a href="${event.sourceUrl}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
+  `;
+}
+
+function init() {
+  const params = new URLSearchParams(window.location.search);
+  const eventId = params.get("id");
+  const stored = sessionStorage.getItem("usChessSelectedTournament");
+
+  if (!stored) {
+    missingView();
+    return;
+  }
+
+  try {
+    const event = JSON.parse(stored);
+    if (!eventId || event.id !== eventId) {
+      missingView();
+      return;
+    }
+
+    renderTournament(event);
+  } catch {
+    missingView();
+  }
+}
+
+init();
