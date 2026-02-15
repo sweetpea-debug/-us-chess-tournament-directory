@@ -346,41 +346,68 @@ def parse_uschess_upcoming(page_html: str, source: dict[str, Any]) -> list[dict[
 
     return out
 
+# ----------------------------
+# Parser: Michess events (follow /event-details/ pages)
+# ----------------------------
 
-# ----------------------------
-# Parser: Michess (follow detail pages)
-# ----------------------------
+MONTHS_ABBR = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
+}
+
+def _michess_extract_detail_urls(listing_html: str, base_url: str) -> list[str]:
+    """
+    Extract /event-details/... URLs from the listing page HTML.
+    """
+    urls: set[str] = set()
+
+    # href="/event-details/..."
+    for href in re.findall(r'href=["\'](/event-details/[^"\']+)["\']', listing_html, flags=re.I):
+        urls.add(urljoin(base_url, href))
+
+    # href="https://www.michess.org/event-details/..."
+    for href in re.findall(r'href=["\'](https?://www\.michess\.org/event-details/[^"\']+)["\']', listing_html, flags=re.I):
+        urls.add(href)
+
+    # Fallback: sometimes URLs appear in JSON blobs without href=
+    for path in re.findall(r'(/event-details/[a-z0-9\-]+-\d+)', listing_html, flags=re.I):
+        urls.add(urljoin(base_url, path))
+
+    return sorted(urls)
+
+
+def _infer_year_from_title(title: str) -> int:
+    m = re.search(r"\b(20\d{2})\b", title)
+    if m:
+        return int(m.group(1))
+    # reasonable fallback: assume current year or next year
+    today = date.today()
+    return today.year
+
 
 def _parse_michess_date_range(line: str, title: str) -> tuple[str, str] | None:
     """
-    Parses Michess detail/listing lines like:
+    Michess detail pages show:
       'Fri, Feb 20 - Sun, Feb 22'
-      'Sat, Nov 22 - Sat, Nov 22'
-    These lines often omit the year; infer from title (common: includes 2026/2027),
-    otherwise infer from "closest future" relative to today.
+    Usually no year; infer year from title (often contains it).
     """
-    s = re.sub(r"^Image\s*", "", line).strip()
-    m = re.match(r"^[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})\s*-\s*[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})$", s)
+    s = line.strip()
+
+    m = re.match(
+        r"^[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})\s*-\s*[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})$",
+        s
+    )
     if not m:
         return None
 
-    m1, d1, m2, d2 = m.group(1).lower(), int(m.group(2)), m.group(3).lower(), int(m.group(4))
-    mon1 = MONTHS_ABBR.get(m1)
-    mon2 = MONTHS_ABBR.get(m2)
+    mon1 = MONTHS_ABBR.get(m.group(1).lower())
+    mon2 = MONTHS_ABBR.get(m.group(3).lower())
     if not mon1 or not mon2:
         return None
 
-    # year inference
-    y = None
-    ym = re.search(r"\b(20\d{2})\b", title)
-    if ym:
-        y = int(ym.group(1))
-    else:
-        today = date.today()
-        y = today.year
-        # If month already "far behind", assume next year
-        if mon1 < today.month - 2:
-            y += 1
+    d1 = int(m.group(2))
+    d2 = int(m.group(4))
+    y = _infer_year_from_title(title)
 
     try:
         start = date(y, mon1, d1)
@@ -392,77 +419,72 @@ def _parse_michess_date_range(line: str, title: str) -> tuple[str, str] | None:
         return None
 
 
-def _michess_extract_detail_urls(listing_html: str, base_url: str) -> list[str]:
-    hrefs = set()
-    for href in re.findall(r'href="(/event-details/[^"]+)"', listing_html, flags=re.I):
-        hrefs.add(urljoin(base_url, href))
-    # Some pages may use full URLs already
-    for href in re.findall(r'href="(https?://www\.michess\.org/event-details/[^"]+)"', listing_html, flags=re.I):
-        hrefs.add(href)
-    return sorted(hrefs)
+def _grab_value_after_label(lines: list[str], label: str) -> str:
+    """
+    On michess detail pages, fields appear as:
+      Format:
+      <value...>
+    """
+    label_lower = label.lower().strip()
+    for i, ln in enumerate(lines):
+        if ln.strip().lower() == label_lower:
+            # next non-empty line
+            for j in range(i + 1, min(i + 12, len(lines))):
+                v = lines[j].strip()
+                if v:
+                    # stop if we hit another label
+                    if v.endswith(":") and len(v) <= 25:
+                        return ""
+                    return v
+    return ""
 
 
 def parse_michess_event_detail(detail_html: str, source: dict[str, Any], url: str) -> dict[str, Any] | None:
     lines = _strip_html_to_lines(detail_html)
 
-    # Title is usually present as a strong line near top; easiest: find first non-generic title-ish line
+    # Title: first meaningful line after "Events"
     title = ""
-    for ln in lines[:60]:
-        if ln.lower() in {"events", "event", "submit event"}:
+    for ln in lines[:80]:
+        low = ln.lower().strip()
+        if low in {"events", "event", "submit event"}:
             continue
-        if len(ln) > 6 and "michigan chess association" not in ln.lower():
-            # the detail pages show the event title plainly (see examples) :contentReference[oaicite:9]{index=9}
+        if len(ln.strip()) >= 6:
             title = ln.strip()
             break
     if not title:
         return None
 
+    # Date range line appears near top: "Fri, Feb 20 - Sun, Feb 22"
     startDate = endDate = None
+    for ln in lines[:120]:
+        dr = _parse_michess_date_range(ln.strip(), title)
+        if dr:
+            startDate, endDate = dr
+            break
+    if not startDate:
+        return None
+
+    # Location line ends with "United States" and contains City, ST
     venue_line = ""
     city = "Unknown"
     state = "US"
-    fmt = ""
-    time_control = ""
-    entry_fee = ""
-
-    for ln in lines:
-        # date range line
-        if startDate is None:
-            dr = _parse_michess_date_range(ln, title)
-            if dr:
-                startDate, endDate = dr
-
-        # location line often like: 'Hyatt Regency ... Schaumburg, IL, 60423, United States' :contentReference[oaicite:10]{index=10}
-        if "United States" in ln and "," in ln and venue_line == "":
-            venue_line = re.sub(r"^Image\s*", "", ln).strip()
+    for ln in lines[:200]:
+        if "United States" in ln and "," in ln:
+            venue_line = ln.strip()
             mloc = re.search(r"\b([A-Za-z .'-]+),\s*([A-Z]{2})\b", venue_line)
             if mloc:
                 city = mloc.group(1).strip()
                 state = mloc.group(2).strip()
-
-        # Format:
-        if ln.strip().lower() == "format:":
-            # next non-empty line is often the format value
-            continue
-
-    # Try to pull "Format:" value by scanning around the "Format:" token
-    for idx, ln in enumerate(lines):
-        if ln.strip().lower() == "format:":
-            for j in range(idx + 1, min(idx + 6, len(lines))):
-                cand = lines[j].strip()
-                if cand and cand.lower() not in {"directions:", "notes:", "events"}:
-                    fmt = cand
-                    break
             break
 
-    # Pull time control from format if it contains G/.. d..
-    if fmt:
-        m_tc = re.search(r"\bG/\s*\d+\s*(?:;|,|\s)\s*d\s*\d+\b", fmt, flags=re.I)
-        if m_tc:
-            time_control = re.sub(r"\s+", "", m_tc.group(0)).replace(",", ";").upper()
+    fmt = _grab_value_after_label(lines, "Format:")
+    tc = _grab_value_after_label(lines, "Time Control:")
+    fee = _grab_value_after_label(lines, "Entry Fee:")
 
-    if not startDate:
-        return None
+    # normalize time control a bit if it contains the common G..;d.. pattern
+    if tc:
+        # keep as-is, but trim excessive spaces
+        tc = re.sub(r"\s+", " ", tc).strip()
 
     return {
         "id": f"{source['id']}-{sanitize_slug(title)}-{startDate}",
@@ -475,9 +497,9 @@ def parse_michess_event_detail(detail_html: str, source: dict[str, Any], url: st
         "lat": 44.3148,
         "lon": -85.6024,
         "format": fmt,
-        "entryFee": entry_fee,
+        "entryFee": fee,
         "sections": [],
-        "timeControl": time_control,
+        "timeControl": tc,
         "sourceId": source["id"],
         "sourceUrl": url,
     }
@@ -486,12 +508,12 @@ def parse_michess_event_detail(detail_html: str, source: dict[str, Any], url: st
 def parse_michess_events(listing_html: str, source: dict[str, Any]) -> list[dict[str, Any]]:
     base = source["homepage"]
     urls = _michess_extract_detail_urls(listing_html, base)
+
+    print(f"[michess] found {len(urls)} event-details urls")
+    if urls[:3]:
+        print("[michess] sample urls:", urls[:3])
+
     out: list[dict[str, Any]] = []
-
-    # If the listing page didn't contain detail links, we can't proceed.
-    if not urls:
-        return out
-
     for u in urls:
         try:
             detail_html = fetch_text(u)
@@ -499,10 +521,10 @@ def parse_michess_events(listing_html: str, source: dict[str, Any]) -> list[dict
             if ev:
                 out.append(ev)
         except Exception as e:
-            # don't kill entire run for one bad page
             print(f"[michess] detail FAILED {u}: {e}")
 
     return out
+
 
 
 # ----------------------------
