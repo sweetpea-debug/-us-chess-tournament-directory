@@ -1,7 +1,11 @@
-// details.js
+import { SOURCE_CATALOG } from "./data.js";
 import { formatDateRange } from "./utils.js";
 
 const detailsRoot = document.getElementById("details");
+
+function resolveSource(sourceId) {
+  return SOURCE_CATALOG.find((source) => source.id === sourceId);
+}
 
 function missingView() {
   detailsRoot.innerHTML = `
@@ -10,40 +14,31 @@ function missingView() {
   `;
 }
 
-function line(label, value, fallback = "") {
-  const trimmed =
-    value === null || value === undefined ? "" : String(value).trim();
-
-  const out = trimmed || fallback;
-  if (!out) return "";
-  return `<p><strong>${label}:</strong> ${out}</p>`;
+function line(label, value) {
+  const v = String(value || "").trim();
+  if (!v) return "";
+  return `<p><strong>${label}:</strong> ${v}</p>`;
 }
 
 function renderTournament(event) {
-  const sectionsText =
-    Array.isArray(event.sections) && event.sections.length
-      ? event.sections.join(", ")
-      : "";
+  const source = resolveSource(event.sourceId);
 
-  const locationText =
-    event.city && event.state ? `${event.city}, ${event.state}` : "";
+  const sectionsText =
+    Array.isArray(event.sections) && event.sections.length ? event.sections.join(", ") : "";
 
   detailsRoot.innerHTML = `
-    <h1>${event.name || "Tournament"}</h1>
+    <h1>${event.name}</h1>
 
     ${line("Dates", formatDateRange(event.startDate, event.endDate))}
-    ${line("Location", locationText)}
+    ${line("Location", `${event.city}, ${event.state}`)}
     ${line("Venue", event.venue)}
 
-    ${line("Time control", event.timeControl, "See source")}
-    ${line("Sections", sectionsText, "See source")}
-    ${line("Entry fee", event.entryFee, "See source")}
+    ${line("Time control", event.timeControl)}
+    ${line("Sections", sectionsText)}
+    ${line("Entry fee", event.entryFee)}
 
-    ${
-      event.sourceUrl
-        ? `<p><a href="${event.sourceUrl}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>`
-        : ""
-    }
+    ${line("Source", source?.name || "Unknown source")}
+    <p><a href="${event.sourceUrl}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
   `;
 }
 
@@ -52,11 +47,17 @@ function init() {
   const eventId = params.get("id");
   const stored = sessionStorage.getItem("usChessSelectedTournament");
 
-  if (!stored) return missingView();
+  if (!stored) {
+    missingView();
+    return;
+  }
 
   try {
     const event = JSON.parse(stored);
-    if (!eventId || !event?.id || event.id !== eventId) return missingView();
+    if (!eventId || event.id !== eventId) {
+      missingView();
+      return;
+    }
     renderTournament(event);
   } catch {
     missingView();
