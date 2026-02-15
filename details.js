@@ -10,9 +10,13 @@ function missingView() {
   `;
 }
 
-function line(label, value) {
-  if (!value) return "";
-  return `<p><strong>${label}:</strong> ${value}</p>`;
+function line(label, value, fallback = "") {
+  const trimmed =
+    value === null || value === undefined ? "" : String(value).trim();
+
+  const out = trimmed || fallback;
+  if (!out) return "";
+  return `<p><strong>${label}:</strong> ${out}</p>`;
 }
 
 function renderTournament(event) {
@@ -21,16 +25,19 @@ function renderTournament(event) {
       ? event.sections.join(", ")
       : "";
 
+  const locationText =
+    event.city && event.state ? `${event.city}, ${event.state}` : "";
+
   detailsRoot.innerHTML = `
     <h1>${event.name || "Tournament"}</h1>
 
     ${line("Dates", formatDateRange(event.startDate, event.endDate))}
-    ${line("Location", event.city && event.state ? `${event.city}, ${event.state}` : "")}
+    ${line("Location", locationText)}
     ${line("Venue", event.venue)}
 
-    ${line("Time control", event.timeControl)}
-    ${line("Sections", sectionsText)}
-    ${line("Entry fee", event.entryFee)}
+    ${line("Time control", event.timeControl, "See source")}
+    ${line("Sections", sectionsText, "See source")}
+    ${line("Entry fee", event.entryFee, "See source")}
 
     ${
       event.sourceUrl
