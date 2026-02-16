@@ -76,7 +76,7 @@ async function loadEvents() {
     appState.allEvents = payload.events;
     updateSyncLabel(payload.syncedAt || new Date().toISOString());
     ui.statusMessage.textContent = "";
-  } catch (e) {
+  } catch {
     appState.allEvents = [];
     updateSyncLabel(new Date().toISOString());
     ui.statusMessage.textContent =
