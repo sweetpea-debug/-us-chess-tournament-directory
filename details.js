@@ -1,11 +1,6 @@
-import { SOURCE_CATALOG } from "./data.js";
 import { formatDateRange } from "./utils.js";
 
 const detailsRoot = document.getElementById("details");
-
-function resolveSource(sourceId) {
-  return SOURCE_CATALOG.find((source) => source.id === sourceId);
-}
 
 function missingView() {
   detailsRoot.innerHTML = `
@@ -14,34 +9,36 @@ function missingView() {
   `;
 }
 
-function line(label, value) {
-  if (!value) return "";
-  return `<p><strong>${label}:</strong> ${value}</p>`;
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function renderTournament(event) {
-  const source = resolveSource(event.sourceId);
-
-  const sectionsText =
-    Array.isArray(event.sections) && event.sections.length ? event.sections.join(", ") : "";
+  const fullText = event.fullText ? escapeHtml(event.fullText) : "No source text captured.";
 
   detailsRoot.innerHTML = `
-    <h1>${event.name}</h1>
-    ${line("Dates", formatDateRange(event.startDate, event.endDate))}
-    ${line("Location", `${event.city}, ${event.state}`)}
-    ${line("Venue", event.venue)}
-    ${line("Time control", event.timeControl)}
-    ${line("Sections", sectionsText)}
-    ${line("Entry fee", event.entryFee)}
-    ${line("Source", source?.name || "Unknown source")}
-    <p><a href="${event.sourceUrl}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
+    <h1>${escapeHtml(event.name)}</h1>
+    <p><strong>Dates:</strong> ${escapeHtml(formatDateRange(event.startDate, event.endDate))}</p>
+    <p><strong>Location:</strong> ${escapeHtml(`${event.city}, ${event.state}`)}</p>
+
+    <p><a href="${escapeHtml(event.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
+
+    <hr />
+
+    <h2>Source text</h2>
+    <pre style="white-space: pre-wrap; font-family: inherit; line-height: 1.4;">${fullText}</pre>
   `;
 }
 
 function init() {
   const params = new URLSearchParams(window.location.search);
   const eventId = params.get("id");
-  const stored = sessionStorage.getItem("usChessSelectedTournament");
+  const stored = sessionStorage.getItem("selectedTournament");
 
   if (!stored) {
     missingView();
@@ -54,7 +51,6 @@ function init() {
       missingView();
       return;
     }
-
     renderTournament(event);
   } catch {
     missingView();
