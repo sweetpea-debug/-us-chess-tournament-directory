@@ -31,7 +31,7 @@ function renderTournament(event) {
     <hr />
 
     <h2>Source text</h2>
-    <pre style="white-space: pre-wrap; font-family: inherit; line-height: 1.4;">${fullText}</pre>
+    <pre class="source-text">${fullText}</pre>
   `;
 }
 
@@ -40,17 +40,11 @@ function init() {
   const eventId = params.get("id");
   const stored = sessionStorage.getItem("selectedTournament");
 
-  if (!stored) {
-    missingView();
-    return;
-  }
+  if (!stored) return missingView();
 
   try {
     const event = JSON.parse(stored);
-    if (!eventId || event.id !== eventId) {
-      missingView();
-      return;
-    }
+    if (!eventId || event.id !== eventId) return missingView();
     renderTournament(event);
   } catch {
     missingView();
