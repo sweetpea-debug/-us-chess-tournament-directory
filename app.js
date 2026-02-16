@@ -50,40 +50,22 @@ function renderStateFilter() {
 }
 
 function computeVisibleEvents() {
-  let events = appState.allEvents.filter((event) =>
-    appState.selectedState === "all" ? true : event.state === appState.selectedState,
-  );
+  const filtered = appState.allEvents
+    .filter((event) => (appState.selectedState === "all" ? true : event.state === appState.selectedState))
+    .map((event) => {
+      if (!appState.city) return { ...event, distance: null };
 
-  let missingCoords = 0;
+      const d = haversineMiles(appState.city.lat, appState.city.lon, event.lat, event.lon);
+      return { ...event, distance: d };
+    });
 
-  events = events.map((event) => {
-    if (!appState.city) return { ...event, distance: null };
+  // If a city filter is active, only keep events that have a real distance
+  // (otherwise the filter "never works" because coords are missing).
+  const withinRadius = appState.city
+    ? filtered.filter((event) => event.distance !== null && event.distance <= SEARCH_RADIUS_MILES)
+    : filtered;
 
-    const dist = haversineMiles(appState.city.lat, appState.city.lon, event.lat, event.lon);
-    if (dist === null) missingCoords += 1;
-
-    return { ...event, distance: dist };
-  });
-
-  if (appState.city) {
-    const before = events.length;
-    events = events.filter((event) => event.distance !== null && event.distance <= SEARCH_RADIUS_MILES);
-
-    if (missingCoords > 0) {
-      ui.statusMessage.textContent = `Showing ${events.length} within ${SEARCH_RADIUS_MILES} miles of ${appState.city.label}. (${missingCoords} tournament(s) omitted because they don't have coordinates yet.)`;
-    } else {
-      ui.statusMessage.textContent = `Showing ${events.length} within ${SEARCH_RADIUS_MILES} miles of ${appState.city.label}.`;
-    }
-
-    // If literally everything got filtered out, make that obvious
-    if (before > 0 && events.length === 0) {
-      ui.statusMessage.textContent =
-        `No tournaments within ${SEARCH_RADIUS_MILES} miles of ${appState.city.label}. ` +
-        (missingCoords > 0 ? `Also, ${missingCoords} tournament(s) are missing coordinates.` : "");
-    }
-  }
-
-  return events.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+  return withinRadius.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
 }
 
 function renderCards() {
@@ -97,16 +79,13 @@ function renderCards() {
   events.forEach((event) => {
     const node = ui.template.content.cloneNode(true);
 
-    node.querySelector(".card__title").textContent = event.name || "(untitled)";
+    node.querySelector(".card__title").textContent = event.name;
     node.querySelector(".card__dates").textContent = formatDateRange(event.startDate, event.endDate);
+    node.querySelector(".card__location").textContent = `${event.city}, ${event.state}`;
 
-    const loc = `${event.city || "Unknown"}, ${event.state || "US"}`;
-    node.querySelector(".card__location").textContent = loc;
-
-    const venueEl = node.querySelector(".card__venue");
-    const venue = (event.venue || "").trim();
-    venueEl.textContent = venue ? venue : "";
-    if (!venue) venueEl.style.display = "none";
+    // Keep this line if you still want a “summary line” on the card.
+    // If you don’t, we can remove it later.
+    node.querySelector(".card__format").textContent = event.venue ? event.venue : "";
 
     const chips = node.querySelector(".chips");
 
@@ -227,6 +206,8 @@ function bind() {
 
       appState.city = location;
       writeStorage(CITY_KEY, location);
+
+      ui.statusMessage.textContent = `Showing tournaments within ${SEARCH_RADIUS_MILES} miles of ${location.label}. (Events missing coordinates are hidden.)`;
       renderCards();
     } catch {
       ui.statusMessage.textContent = "Could not geocode city right now. Try again shortly.";
@@ -256,10 +237,12 @@ function bind() {
 
 async function init() {
   window.__radarBooted = true;
+
   bind();
 
   if (appState.city?.label) {
     ui.statusMessage.textContent = `Loaded saved city filter: ${appState.city.label}`;
+    ui.cityInput.value = appState.city.label;
   }
 
   await loadEvents();
