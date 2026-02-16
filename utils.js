@@ -1,23 +1,30 @@
-export function formatDateRange(startISO, endISO) {
-  if (!startISO) return "";
-  const start = new Date(startISO);
-  const end = endISO ? new Date(endISO) : start;
+export const CACHE_KEY = "us-chess-radar-events-v2";
+export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-  const sameDay =
-    start.getFullYear() === end.getFullYear() &&
-    start.getMonth() === end.getMonth() &&
-    start.getDate() === end.getDate();
+export function formatDateRange(startDate, endDate) {
+  const options = { month: "short", day: "numeric", year: "numeric" };
+  const start = new Date(startDate).toLocaleDateString(undefined, options);
+  const end = new Date(endDate).toLocaleDateString(undefined, options);
 
-  const fmt = (d) =>
-    d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  // If same day, show just one date
+  if (startDate === endDate) return start;
+  return `${start} - ${end}`;
+}
 
-  return sameDay ? fmt(start) : `${fmt(start)} - ${fmt(end)}`;
+export function readStorage(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function writeStorage(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
 }
 
 export function stateList(events) {
-  const set = new Set();
-  (events || []).forEach((e) => {
-    if (e && e.state) set.add(e.state);
-  });
-  return Array.from(set).sort();
+  return [...new Set(events.map((e) => e.state))].sort((a, b) => a.localeCompare(b));
 }
