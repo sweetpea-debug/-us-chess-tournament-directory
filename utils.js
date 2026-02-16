@@ -9,5 +9,7 @@ export function formatDateRange(startDate, endDate) {
 }
 
 export function stateList(events) {
-  return [...new Set(events.map((event) => event.state))].sort((a, b) => a.localeCompare(b));
+  return [...new Set(events.map((event) => event.state))]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
 }
