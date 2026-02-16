@@ -64,7 +64,7 @@
         <h3 class="card__title"></h3>
         <p class="card__dates"></p>
         <p class="card__location"></p>
-        <p class="card__format"></p>
+        <p class="card__venue"></p>
         <div class="chips"></div>
         <button type="button" class="btn card__open">Open details</button>
       </article>
@@ -79,13 +79,8 @@
         const resultCount = document.getElementById("result-count");
         const cards = document.getElementById("cards");
 
-        if (status) {
-          status.textContent =
-            "The app script did not load. Re-copy app.js, data.js, and utils.js as full files (no markdown).";
-        }
-        if (resultCount) {
-          resultCount.textContent = "Data did not load";
-        }
+        if (status) status.textContent = "The app script did not load. Check app.js/data.js/utils.js.";
+        if (resultCount) resultCount.textContent = "Data did not load";
         if (cards && !cards.children.length) {
           cards.innerHTML =
             '<p class="muted">No cards rendered yet. This usually means one JS file was pasted with extra markdown text.</p>';
@@ -101,17 +96,15 @@
         const locationHint = event.filename ? `${event.filename}:${event.lineno || "?"}` : "unknown file";
 
         if (status) {
-          status.textContent = `JavaScript error before startup (${locationHint}). Re-copy app.js, data.js, and utils.js as plain file text only.`;
+          status.textContent = `JavaScript error before startup (${locationHint}). Check data.js exports and module imports.`;
         }
-        if (resultCount) {
-          resultCount.textContent = "Startup error";
-        }
+        if (resultCount) resultCount.textContent = "Startup error";
         if (cards && !cards.children.length) {
           cards.innerHTML = `<p class="muted">Startup failed: ${event.message || "Unknown JavaScript error"}</p>`;
         }
       });
     </script>
 
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js" id="app-module"></script>
   </body>
 </html>
