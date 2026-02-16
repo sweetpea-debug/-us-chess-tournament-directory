@@ -4,10 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>US Chess Tournament Radar</title>
-    <meta
-      name="description"
-      content="Daily-updating United States chess tournament directory with state filters and 100-mile city search."
-    />
+    <meta name="description" content="United States chess tournament directory." />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -15,12 +12,9 @@
       <div class="container">
         <p class="hero__eyebrow">UNITED STATES CHESS TOURNAMENT RADAR</p>
         <h1>Find tournaments across the United States</h1>
-        <p class="hero__subtitle">
-          Aggregated from official listings. Data refreshes every 24 hours.
-        </p>
+        <p class="hero__subtitle">Updated automatically from official listings.</p>
         <div class="hero__meta">
           <span id="sync-label">Last sync: never</span>
-          <button id="refresh-button" type="button" class="btn btn--secondary">Refresh now</button>
         </div>
       </div>
     </header>
@@ -35,16 +29,6 @@
             <option value="all">All states</option>
           </select>
         </label>
-
-        <label class="field" for="city-input">
-          <span>Within 100 miles of city</span>
-          <input id="city-input" type="text" placeholder="Dallas, TX" autocomplete="off" />
-        </label>
-
-        <div class="row">
-          <button id="apply-city" type="button" class="btn">Apply</button>
-          <button id="clear-city" type="button" class="btn btn--secondary">Clear</button>
-        </div>
 
         <p id="status-message" class="muted" aria-live="polite"></p>
       </aside>
@@ -64,54 +48,10 @@
         <h3 class="card__title"></h3>
         <p class="card__dates"></p>
         <p class="card__location"></p>
-        <p class="card__format"></p>
-        <div class="chips"></div>
         <button type="button" class="btn card__open">Open details</button>
       </article>
     </template>
 
-    <script>
-      window.__radarBooted = false;
-      window.setTimeout(() => {
-        if (window.__radarBooted) return;
-
-        const status = document.getElementById("status-message");
-        const resultCount = document.getElementById("result-count");
-        const cards = document.getElementById("cards");
-
-        if (status) {
-          status.textContent =
-            "The app script did not load. Re-copy app.js, data.js, and utils.js as full files.";
-        }
-        if (resultCount) {
-          resultCount.textContent = "Data did not load";
-        }
-        if (cards && !cards.children.length) {
-          cards.innerHTML =
-            '<p class="muted">No cards rendered yet. This usually means one JS file was pasted with extra markdown text.</p>';
-        }
-      }, 2500);
-
-      window.addEventListener("error", (event) => {
-        if (window.__radarBooted) return;
-
-        const status = document.getElementById("status-message");
-        const resultCount = document.getElementById("result-count");
-        const cards = document.getElementById("cards");
-        const locationHint = event.filename ? `${event.filename}:${event.lineno || "?"}` : "unknown file";
-
-        if (status) {
-          status.textContent = `JavaScript error before startup (${locationHint}). Re-copy app.js, data.js, and utils.js as plain file text only.`;
-        }
-        if (resultCount) {
-          resultCount.textContent = "Startup error";
-        }
-        if (cards && !cards.children.length) {
-          cards.innerHTML = `<p class="muted">Startup failed: ${event.message || "Unknown JavaScript error"}</p>`;
-        }
-      });
-    </script>
-
-    <script type="module" src="app.js" id="app-module"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>
