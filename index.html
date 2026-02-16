@@ -6,7 +6,7 @@
     <title>US Chess Tournament Radar</title>
     <meta
       name="description"
-      content="Daily-updating United States chess tournament directory. Filter by state and open details with full source text."
+      content="Daily-updating United States chess tournament directory. Filter by state and open any event to view full source text."
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -56,6 +56,46 @@
         <button type="button" class="btn card__open">Open details</button>
       </article>
     </template>
+
+    <script>
+      window.__radarBooted = false;
+      window.setTimeout(() => {
+        if (window.__radarBooted) return;
+
+        const status = document.getElementById("status-message");
+        const resultCount = document.getElementById("result-count");
+        const cards = document.getElementById("cards");
+
+        if (status) {
+          status.textContent = "The app script did not load. Re-copy app.js, data.js, and utils.js as full files.";
+        }
+        if (resultCount) {
+          resultCount.textContent = "Data did not load";
+        }
+        if (cards && !cards.children.length) {
+          cards.innerHTML = '<p class="muted">No cards rendered yet. This usually means a JS file was pasted with extra markdown text.</p>';
+        }
+      }, 2500);
+
+      window.addEventListener("error", (event) => {
+        if (window.__radarBooted) return;
+
+        const status = document.getElementById("status-message");
+        const resultCount = document.getElementById("result-count");
+        const cards = document.getElementById("cards");
+        const locationHint = event.filename ? `${event.filename}:${event.lineno || "?"}` : "unknown file";
+
+        if (status) {
+          status.textContent = `JavaScript error before startup (${locationHint}). Re-copy app.js, data.js, and utils.js as plain file text only.`;
+        }
+        if (resultCount) {
+          resultCount.textContent = "Startup error";
+        }
+        if (cards && !cards.children.length) {
+          cards.innerHTML = `<p class="muted">Startup failed: ${event.message || "Unknown JavaScript error"}</p>`;
+        }
+      });
+    </script>
 
     <script type="module" src="app.js"></script>
   </body>
