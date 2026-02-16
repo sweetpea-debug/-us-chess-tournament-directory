@@ -1,15 +1,13 @@
-export const SOURCE_CATALOG = [
+export const FALLBACK_EVENTS = [
   {
-    id: "uschess-upcoming",
-    name: "US Chess Upcoming Tournaments",
-    homepage: "https://new.uschess.org/upcoming-tournaments",
-  },
-  {
-    id: "michess",
-    name: "Michigan Chess Association",
-    homepage: "https://www.michess.org/events",
+    id: "fallback-1",
+    name: "Sample Tournament (fallback)",
+    startDate: "2026-02-15",
+    endDate: "2026-02-15",
+    city: "Columbus",
+    state: "OH",
+    sourceId: "fallback",
+    sourceUrl: "https://example.com",
+    sourceText: "This is fallback text shown only if events.json is missing.",
   },
 ];
-
-// Keep a tiny fallback so the UI still renders if events.json is missing
-export const FALLBACK_EVENTS = [];
