@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>US Chess Tournament Radar</title>
-    <meta name="description" content="United States chess tournament directory." />
+    <meta name="description" content="Daily-updating United States chess tournament directory with state filter." />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -12,26 +12,28 @@
       <div class="container">
         <p class="hero__eyebrow">UNITED STATES CHESS TOURNAMENT RADAR</p>
         <h1>Find tournaments across the United States</h1>
-        <p class="hero__subtitle">Updated automatically from official listings.</p>
+        <p class="hero__subtitle">
+          Aggregated from federation calendars, organizer pages, and event platforms.
+        </p>
         <div class="hero__meta">
           <span id="sync-label">Last sync: never</span>
         </div>
       </div>
     </header>
 
-    <main class="container layout">
-      <aside class="panel" aria-label="Filters">
-        <h2>Filters</h2>
+    <main class="container">
+      <section class="panel controls" aria-label="Filters">
+        <div class="controls__row">
+          <label class="field" for="state-filter">
+            <span>Filter by state</span>
+            <select id="state-filter">
+              <option value="all">All states</option>
+            </select>
+          </label>
 
-        <label class="field" for="state-filter">
-          <span>US state</span>
-          <select id="state-filter">
-            <option value="all">All states</option>
-          </select>
-        </label>
-
-        <p id="status-message" class="muted" aria-live="polite"></p>
-      </aside>
+          <p id="status-message" class="muted" aria-live="polite"></p>
+        </div>
+      </section>
 
       <section class="panel" aria-label="Tournament results">
         <div class="results-head">
