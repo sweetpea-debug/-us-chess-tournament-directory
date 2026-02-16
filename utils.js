@@ -1,15 +1,23 @@
-export function formatDateRange(startDate, endDate) {
-  const options = { month: "short", day: "numeric", year: "numeric" };
-  const start = new Date(startDate).toLocaleDateString(undefined, options);
+export function formatDateRange(startISO, endISO) {
+  if (!startISO) return "";
+  const start = new Date(startISO);
+  const end = endISO ? new Date(endISO) : start;
 
-  if (!endDate || endDate === startDate) return start;
+  const sameDay =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === end.getDate();
 
-  const end = new Date(endDate).toLocaleDateString(undefined, options);
-  return `${start} - ${end}`;
+  const fmt = (d) =>
+    d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+
+  return sameDay ? fmt(start) : `${fmt(start)} - ${fmt(end)}`;
 }
 
 export function stateList(events) {
-  return [...new Set(events.map((event) => event.state))]
-    .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b));
+  const set = new Set();
+  (events || []).forEach((e) => {
+    if (e && e.state) set.add(e.state);
+  });
+  return Array.from(set).sort();
 }
