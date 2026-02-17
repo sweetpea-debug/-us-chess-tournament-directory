@@ -1,6 +1,16 @@
+// details.js
 import { formatDateRange } from "./utils.js";
 
 const detailsRoot = document.getElementById("details");
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
 function missingView() {
   detailsRoot.innerHTML = `
@@ -9,31 +19,27 @@ function missingView() {
   `;
 }
 
-function esc(str) {
-  return String(str ?? "");
-}
-
 function renderTournament(event) {
-  const sourceText = esc(event.sourceText || "").trim();
+  const dateText = formatDateRange(event.startDate, event.endDate);
+  const locationText = `${event.city || "Unknown"}, ${event.state || "US"}`;
+  const sourceUrl = event.sourceUrl || "#";
+  const sourceText = event.sourceText || "No source text captured for this event yet.";
 
   detailsRoot.innerHTML = `
-    <h1>${esc(event.name || "Untitled event")}</h1>
+    <h1>${escapeHtml(event.name || "Untitled event")}</h1>
 
-    <p><strong>Dates:</strong> ${formatDateRange(event.startDate, event.endDate)}</p>
-    <p><strong>Location:</strong> ${esc(event.city || "Unknown")}, ${esc(event.state || "US")}</p>
+    <p><strong>Dates:</strong> ${escapeHtml(dateText)}</p>
+    <p><strong>Location:</strong> ${escapeHtml(locationText)}</p>
 
-    <p><a href="${esc(event.sourceUrl || "#")}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
+    <p><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
 
     <hr />
 
     <h2>Source text</h2>
-    <pre class="source-pre" id="source-pre"></pre>
+    <pre style="white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; background: #f7faff; border: 1px solid #bed0ee; padding: 0.9rem; border-radius: 12px;">
+${escapeHtml(sourceText)}
+    </pre>
   `;
-
-  const pre = document.getElementById("source-pre");
-  if (pre) {
-    pre.textContent = sourceText || "No source text was captured for this event.";
-  }
 }
 
 function init() {
@@ -52,7 +58,6 @@ function init() {
       missingView();
       return;
     }
-
     renderTournament(event);
   } catch {
     missingView();
