@@ -19,50 +19,45 @@ function updateSyncLabel(iso) {
   ui.syncLabel.textContent = `Last sync: ${new Date(iso).toLocaleString()}`;
 }
 
-async function fetchPublishedEvents() {
+async function fetchEventsJson() {
   const cacheBuster = Date.now();
-  const response = await fetch(`events.json?v=${cacheBuster}`);
-  if (!response.ok) throw new Error(`events.json not found (${response.status})`);
-
-  const payload = await response.json();
-  if (!Array.isArray(payload.events)) throw new Error("Invalid events.json payload");
-
-  return {
-    events: payload.events,
-    syncedAt: payload.syncedAt || new Date().toISOString(),
-  };
+  const resp = await fetch(`events.json?v=${cacheBuster}`);
+  if (!resp.ok) throw new Error(`events.json HTTP ${resp.status}`);
+  const payload = await resp.json();
+  if (!payload || !Array.isArray(payload.events)) throw new Error("Invalid events.json payload");
+  return payload;
 }
 
 function renderStateFilter() {
   ui.stateFilter.innerHTML = '<option value="all">All states</option>';
 
   stateList(appState.allEvents)
-    .filter((s) => s && s !== "US")
-    .forEach((stateCode) => {
-      const option = document.createElement("option");
-      option.value = stateCode;
-      option.textContent = stateCode;
-      ui.stateFilter.appendChild(option);
+    .filter((st) => st && st !== "US")
+    .forEach((st) => {
+      const opt = document.createElement("option");
+      opt.value = st;
+      opt.textContent = st;
+      ui.stateFilter.appendChild(opt);
     });
 
   ui.stateFilter.value = appState.selectedState;
 }
 
-function visibleEvents() {
+function computeVisibleEvents() {
   return appState.allEvents
-    .filter((ev) => (appState.selectedState === "all" ? true : ev.state === appState.selectedState))
+    .filter((e) => (appState.selectedState === "all" ? true : e.state === appState.selectedState))
     .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
 }
 
 function renderCards() {
-  const events = visibleEvents();
+  const events = computeVisibleEvents();
   ui.cards.innerHTML = "";
 
   if (!events.length) {
     ui.cards.innerHTML = '<p class="muted">No tournaments match your current filter.</p>';
   }
 
-  events.forEach((event) => {
+  for (const event of events) {
     const node = ui.template.content.cloneNode(true);
     node.querySelector(".card__title").textContent = event.name || "Untitled event";
     node.querySelector(".card__dates").textContent = formatDateRange(event.startDate, event.endDate);
@@ -74,34 +69,36 @@ function renderCards() {
     });
 
     ui.cards.appendChild(node);
-  });
+  }
 
   ui.resultCount.textContent = `${events.length} tournament${events.length === 1 ? "" : "s"}`;
 }
 
-async function init() {
-  ui.statusMessage.textContent = "Loading…";
-
-  try {
-    const published = await fetchPublishedEvents();
-    appState.allEvents = published.events;
-    updateSyncLabel(published.syncedAt);
-    ui.statusMessage.textContent = "";
-  } catch (err) {
-    // fallback if events.json truly unavailable
-    const syncedAt = new Date().toISOString();
-    appState.allEvents = FALLBACK_EVENTS;
-    updateSyncLabel(syncedAt);
-    ui.statusMessage.textContent = "Could not load events.json. Using fallback dataset.";
-  }
-
-  renderStateFilter();
-  renderCards();
-
+function bind() {
   ui.stateFilter.addEventListener("change", () => {
     appState.selectedState = ui.stateFilter.value;
     renderCards();
   });
+}
+
+async function init() {
+  bind();
+
+  try {
+    const payload = await fetchEventsJson();
+    appState.allEvents = payload.events;
+    updateSyncLabel(payload.syncedAt || new Date().toISOString());
+    ui.statusMessage.textContent = "";
+  } catch (err) {
+    // fallback
+    appState.allEvents = FALLBACK_EVENTS;
+    updateSyncLabel(new Date().toISOString());
+    ui.statusMessage.textContent = "Could not load events.json. Using fallback dataset (may be empty).";
+    console.error(err);
+  }
+
+  renderStateFilter();
+  renderCards();
 }
 
 init();
