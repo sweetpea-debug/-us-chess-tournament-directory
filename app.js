@@ -1,5 +1,4 @@
-import { FALLBACK_EVENTS } from "./data.js";
-import { formatDateRange, stateList } from "./utils.js";
+import { CACHE_KEY, CACHE_TTL_MS, formatDateRange, readStorage, stateList, writeStorage } from "./utils.js";
 
 const ui = {
   stateFilter: document.getElementById("state-filter"),
@@ -19,25 +18,62 @@ function updateSyncLabel(iso) {
   ui.syncLabel.textContent = `Last sync: ${new Date(iso).toLocaleString()}`;
 }
 
-async function fetchEventsJson() {
+function cacheIsFresh(cache) {
+  if (!cache?.syncedAt || !Array.isArray(cache.events)) return false;
+  return Date.now() - new Date(cache.syncedAt).getTime() < CACHE_TTL_MS;
+}
+
+async function fetchPublishedEvents() {
   const cacheBuster = Date.now();
-  const resp = await fetch(`events.json?v=${cacheBuster}`);
-  if (!resp.ok) throw new Error(`events.json HTTP ${resp.status}`);
-  const payload = await resp.json();
-  if (!payload || !Array.isArray(payload.events)) throw new Error("Invalid events.json payload");
-  return payload;
+  const response = await fetch(`events.json?v=${cacheBuster}`);
+  if (!response.ok) {
+    throw new Error("No published events.json yet");
+  }
+
+  const payload = await response.json();
+  if (!Array.isArray(payload.events)) {
+    throw new Error("Invalid events.json payload");
+  }
+
+  return {
+    events: payload.events,
+    syncedAt: payload.syncedAt || new Date().toISOString(),
+  };
+}
+
+async function loadEvents() {
+  const cached = readStorage(CACHE_KEY);
+
+  if (cacheIsFresh(cached)) {
+    appState.allEvents = cached.events;
+    updateSyncLabel(cached.syncedAt);
+    ui.statusMessage.textContent = "Loaded events from cached data.";
+    return;
+  }
+
+  try {
+    const published = await fetchPublishedEvents();
+    appState.allEvents = published.events;
+    writeStorage(CACHE_KEY, published);
+    updateSyncLabel(published.syncedAt);
+    ui.statusMessage.textContent = "Loaded events from daily published feed.";
+  } catch {
+    appState.allEvents = [];
+    ui.statusMessage.textContent =
+      "Could not load events.json. Run the GitHub Action and confirm events.json exists at repo root.";
+  }
 }
 
 function renderStateFilter() {
   ui.stateFilter.innerHTML = '<option value="all">All states</option>';
 
   stateList(appState.allEvents)
-    .filter((st) => st && st !== "US")
-    .forEach((st) => {
-      const opt = document.createElement("option");
-      opt.value = st;
-      opt.textContent = st;
-      ui.stateFilter.appendChild(opt);
+    .filter((stateCode) => stateCode && stateCode !== "US")
+    .forEach((stateCode) => {
+      const option = document.createElement("option");
+      option.value = stateCode;
+      option.textContent = stateCode;
+      ui.stateFilter.appendChild(option);
     });
 
   ui.stateFilter.value = appState.selectedState;
@@ -45,7 +81,7 @@ function renderStateFilter() {
 
 function computeVisibleEvents() {
   return appState.allEvents
-    .filter((e) => (appState.selectedState === "all" ? true : e.state === appState.selectedState))
+    .filter((event) => (appState.selectedState === "all" ? true : event.state === appState.selectedState))
     .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
 }
 
@@ -57,7 +93,7 @@ function renderCards() {
     ui.cards.innerHTML = '<p class="muted">No tournaments match your current filter.</p>';
   }
 
-  for (const event of events) {
+  events.forEach((event) => {
     const node = ui.template.content.cloneNode(true);
     node.querySelector(".card__title").textContent = event.name || "Untitled event";
     node.querySelector(".card__dates").textContent = formatDateRange(event.startDate, event.endDate);
@@ -69,7 +105,7 @@ function renderCards() {
     });
 
     ui.cards.appendChild(node);
-  }
+  });
 
   ui.resultCount.textContent = `${events.length} tournament${events.length === 1 ? "" : "s"}`;
 }
@@ -82,21 +118,9 @@ function bind() {
 }
 
 async function init() {
+  window.__radarBooted = true;
   bind();
-
-  try {
-    const payload = await fetchEventsJson();
-    appState.allEvents = payload.events;
-    updateSyncLabel(payload.syncedAt || new Date().toISOString());
-    ui.statusMessage.textContent = "";
-  } catch (err) {
-    // fallback
-    appState.allEvents = FALLBACK_EVENTS;
-    updateSyncLabel(new Date().toISOString());
-    ui.statusMessage.textContent = "Could not load events.json. Using fallback dataset (may be empty).";
-    console.error(err);
-  }
-
+  await loadEvents();
   renderStateFilter();
   renderCards();
 }
