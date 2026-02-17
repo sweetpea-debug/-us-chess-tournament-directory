@@ -1,5 +1,5 @@
 import { FALLBACK_EVENTS } from "./data.js";
-import { CACHE_KEY, CACHE_TTL_MS, formatDateRange, readStorage, stateList, writeStorage } from "./utils.js";
+import { formatDateRange, stateList } from "./utils.js";
 
 const ui = {
   stateFilter: document.getElementById("state-filter"),
@@ -16,19 +16,13 @@ const appState = {
 };
 
 function updateSyncLabel(iso) {
-  if (!ui.syncLabel) return;
   ui.syncLabel.textContent = `Last sync: ${new Date(iso).toLocaleString()}`;
 }
 
-function cacheIsFresh(cache) {
-  if (!cache?.syncedAt || !Array.isArray(cache.events)) return false;
-  return Date.now() - new Date(cache.syncedAt).getTime() < CACHE_TTL_MS;
-}
-
 async function fetchPublishedEvents() {
-  // cache-buster so GitHub Pages doesn't serve a stale copy
-  const response = await fetch(`events.json?v=${Date.now()}`);
-  if (!response.ok) throw new Error("No published events.json yet");
+  const cacheBuster = Date.now();
+  const response = await fetch(`events.json?v=${cacheBuster}`);
+  if (!response.ok) throw new Error(`events.json not found (${response.status})`);
 
   const payload = await response.json();
   if (!Array.isArray(payload.events)) throw new Error("Invalid events.json payload");
@@ -39,69 +33,40 @@ async function fetchPublishedEvents() {
   };
 }
 
-async function loadEvents() {
-  const cached = readStorage(CACHE_KEY);
-
-  if (cacheIsFresh(cached)) {
-    appState.allEvents = cached.events;
-    updateSyncLabel(cached.syncedAt);
-    if (ui.statusMessage) ui.statusMessage.textContent = "Loaded events from cached data.";
-    return;
-  }
-
-  try {
-    const published = await fetchPublishedEvents();
-    appState.allEvents = published.events;
-    writeStorage(CACHE_KEY, published);
-    updateSyncLabel(published.syncedAt);
-    if (ui.statusMessage) ui.statusMessage.textContent = "Loaded events from published feed.";
-  } catch (e) {
-    const syncedAt = new Date().toISOString();
-    appState.allEvents = FALLBACK_EVENTS;
-    writeStorage(CACHE_KEY, { events: FALLBACK_EVENTS, syncedAt });
-    updateSyncLabel(syncedAt);
-    if (ui.statusMessage) ui.statusMessage.textContent = "Could not load events.json. Using fallback dataset.";
-  }
-}
-
-function computeVisibleEvents() {
-  return appState.allEvents
-    .filter((ev) => (appState.selectedState === "all" ? true : ev.state === appState.selectedState))
-    .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-}
-
 function renderStateFilter() {
-  if (!ui.stateFilter) return;
-
   ui.stateFilter.innerHTML = '<option value="all">All states</option>';
 
   stateList(appState.allEvents)
-    .filter((st) => st && st !== "US")
-    .forEach((st) => {
-      const opt = document.createElement("option");
-      opt.value = st;
-      opt.textContent = st;
-      ui.stateFilter.appendChild(opt);
+    .filter((s) => s && s !== "US")
+    .forEach((stateCode) => {
+      const option = document.createElement("option");
+      option.value = stateCode;
+      option.textContent = stateCode;
+      ui.stateFilter.appendChild(option);
     });
 
   ui.stateFilter.value = appState.selectedState;
 }
 
-function renderCards() {
-  const events = computeVisibleEvents();
+function visibleEvents() {
+  return appState.allEvents
+    .filter((ev) => (appState.selectedState === "all" ? true : ev.state === appState.selectedState))
+    .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+}
 
+function renderCards() {
+  const events = visibleEvents();
   ui.cards.innerHTML = "";
 
-  if (events.length === 0) {
+  if (!events.length) {
     ui.cards.innerHTML = '<p class="muted">No tournaments match your current filter.</p>';
   }
 
   events.forEach((event) => {
     const node = ui.template.content.cloneNode(true);
-
-    node.querySelector(".card__title").textContent = event.name;
+    node.querySelector(".card__title").textContent = event.name || "Untitled event";
     node.querySelector(".card__dates").textContent = formatDateRange(event.startDate, event.endDate);
-    node.querySelector(".card__location").textContent = `${event.city}, ${event.state}`;
+    node.querySelector(".card__location").textContent = `${event.city || "Unknown"}, ${event.state || "US"}`;
 
     node.querySelector(".card__open").addEventListener("click", () => {
       sessionStorage.setItem("usChessSelectedTournament", JSON.stringify(event));
@@ -111,27 +76,32 @@ function renderCards() {
     ui.cards.appendChild(node);
   });
 
-  if (ui.resultCount) {
-    ui.resultCount.textContent = `${events.length} tournament${events.length === 1 ? "" : "s"}`;
-  }
+  ui.resultCount.textContent = `${events.length} tournament${events.length === 1 ? "" : "s"}`;
 }
 
-function bind() {
-  if (!ui.stateFilter) return;
+async function init() {
+  ui.statusMessage.textContent = "Loading…";
+
+  try {
+    const published = await fetchPublishedEvents();
+    appState.allEvents = published.events;
+    updateSyncLabel(published.syncedAt);
+    ui.statusMessage.textContent = "";
+  } catch (err) {
+    // fallback if events.json truly unavailable
+    const syncedAt = new Date().toISOString();
+    appState.allEvents = FALLBACK_EVENTS;
+    updateSyncLabel(syncedAt);
+    ui.statusMessage.textContent = "Could not load events.json. Using fallback dataset.";
+  }
+
+  renderStateFilter();
+  renderCards();
 
   ui.stateFilter.addEventListener("change", () => {
     appState.selectedState = ui.stateFilter.value;
     renderCards();
   });
-}
-
-async function init() {
-  window.__radarBooted = true;
-
-  bind();
-  await loadEvents();
-  renderStateFilter();
-  renderCards();
 }
 
 init();
