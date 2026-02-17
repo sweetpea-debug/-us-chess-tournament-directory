@@ -1,5 +1,6 @@
+// app.js
 import { FALLBACK_EVENTS } from "./data.js";
-import { CACHE_KEY, CACHE_TTL_MS, formatDateRange, readStorage, stateList, writeStorage } from "./utils.js";
+import { formatDateRange, stateList } from "./utils.js";
 
 const ui = {
   stateFilter: document.getElementById("state-filter"),
@@ -10,20 +11,89 @@ const ui = {
   template: document.getElementById("card-template"),
 };
 
+// NOTE: We keep a “last-known-good” cache, but we DO NOT cache fallback/empty results.
+const CACHE_KEY = "tournamentRadarCacheV2";
+
 const appState = {
   allEvents: [],
   selectedState: "all",
 };
 
+function updateSyncLabel(iso) {
+  ui.syncLabel.textContent = `Last sync: ${new Date(iso).toLocaleString()}`;
+}
+
+function readCache() {
+  try {
+    return JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(payload) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+async function fetchPublishedEvents() {
+  // Cache-bust so GitHub Pages/browser doesn’t hand us a stale events.json
+  const cacheBuster = Date.now();
+  const response = await fetch(`events.json?v=${cacheBuster}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`events.json fetch failed (${response.status})`);
+
+  const payload = await response.json();
+  if (!Array.isArray(payload.events)) throw new Error("Invalid events.json payload");
+  return payload;
+}
+
+async function loadEvents() {
+  ui.statusMessage.textContent = "";
+
+  try {
+    const published = await fetchPublishedEvents();
+    appState.allEvents = published.events;
+    updateSyncLabel(published.syncedAt || new Date().toISOString());
+
+    // Only cache if it’s real data
+    if (published.events && published.events.length > 0) {
+      writeCache({ syncedAt: published.syncedAt, events: published.events });
+    }
+
+    ui.statusMessage.textContent = "Loaded events from published feed.";
+    return;
+  } catch (err) {
+    const cached = readCache();
+    if (cached?.events?.length) {
+      appState.allEvents = cached.events;
+      updateSyncLabel(cached.syncedAt || new Date().toISOString());
+      ui.statusMessage.textContent =
+        "Could not load events.json right now. Showing last saved data.";
+      return;
+    }
+
+    // No good cache available -> show fallback, but DO NOT cache it
+    const syncedAt = new Date().toISOString();
+    appState.allEvents = FALLBACK_EVENTS;
+    updateSyncLabel(syncedAt);
+    ui.statusMessage.textContent = "Could not load events.json. No saved data available.";
+  }
+}
+
 function renderStateFilter() {
   ui.stateFilter.innerHTML = '<option value="all">All states</option>';
 
-  stateList(appState.allEvents).forEach((stateCode) => {
-    const option = document.createElement("option");
-    option.value = stateCode;
-    option.textContent = stateCode;
-    ui.stateFilter.appendChild(option);
-  });
+  stateList(appState.allEvents)
+    .filter((stateCode) => stateCode !== "US")
+    .forEach((stateCode) => {
+      const option = document.createElement("option");
+      option.value = stateCode;
+      option.textContent = stateCode;
+      ui.stateFilter.appendChild(option);
+    });
 
   ui.stateFilter.value = appState.selectedState;
 }
@@ -59,63 +129,6 @@ function renderCards() {
   ui.resultCount.textContent = `${events.length} tournament${events.length === 1 ? "" : "s"}`;
 }
 
-function updateSyncLabel(iso) {
-  ui.syncLabel.textContent = `Last sync: ${new Date(iso).toLocaleString()}`;
-}
-
-function cacheIsFresh(cache) {
-  if (!cache?.syncedAt || !Array.isArray(cache.events)) return false;
-  return Date.now() - new Date(cache.syncedAt).getTime() < CACHE_TTL_MS;
-}
-
-async function fetchPublishedEvents() {
-  const cacheBuster = Date.now();
-  // relative path so it works on GitHub Pages /<repo>/
-  const response = await fetch(`./events.json?v=${cacheBuster}`, { cache: "no-store" });
-
-  if (!response.ok) {
-    throw new Error(`Could not load events.json (HTTP ${response.status})`);
-  }
-
-  const payload = await response.json();
-  if (!Array.isArray(payload.events)) {
-    throw new Error("Invalid events.json payload (missing events array)");
-  }
-
-  return {
-    events: payload.events,
-    syncedAt: payload.syncedAt || new Date().toISOString(),
-  };
-}
-
-async function loadEvents() {
-  const cached = readStorage(CACHE_KEY);
-
-  if (cacheIsFresh(cached)) {
-    appState.allEvents = cached.events;
-    updateSyncLabel(cached.syncedAt);
-    ui.statusMessage.textContent = "Loaded events from cached data.";
-    return;
-  }
-
-  try {
-    const published = await fetchPublishedEvents();
-    appState.allEvents = published.events;
-    writeStorage(CACHE_KEY, published);
-    updateSyncLabel(published.syncedAt);
-    ui.statusMessage.textContent = "Loaded events from daily published feed.";
-  } catch (err) {
-    const syncedAt = new Date().toISOString();
-    const fallbackPayload = { events: FALLBACK_EVENTS, syncedAt };
-    appState.allEvents = FALLBACK_EVENTS;
-    writeStorage(CACHE_KEY, fallbackPayload);
-    updateSyncLabel(syncedAt);
-    ui.statusMessage.textContent = "Could not load events.json. Using fallback dataset.";
-    // Helpful in DevTools:
-    console.error(err);
-  }
-}
-
 function bind() {
   ui.stateFilter.addEventListener("change", () => {
     appState.selectedState = ui.stateFilter.value;
@@ -128,7 +141,6 @@ async function init() {
   await loadEvents();
   renderStateFilter();
   renderCards();
-  window.__radarBooted = true;
 }
 
 init();
