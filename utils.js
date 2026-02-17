@@ -1,19 +1,35 @@
-export function formatDateRange(startIso, endIso) {
-  if (!startIso) return "";
-  const start = new Date(startIso);
-  const end = endIso ? new Date(endIso) : start;
+// utils.js
 
-  const opts = { year: "numeric", month: "short", day: "numeric" };
-  const startText = start.toLocaleDateString(undefined, opts);
-  const endText = end.toLocaleDateString(undefined, opts);
+export function formatDateRange(startISO, endISO) {
+  if (!startISO) return "";
+  const start = new Date(startISO);
+  const end = endISO ? new Date(endISO) : start;
 
-  return startIso === endIso ? startText : `${startText} - ${endText}`;
+  const sameDay =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === end.getDate();
+
+  const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+  if (sameDay) return fmt.format(start);
+  return `${fmt.format(start)} – ${fmt.format(end)}`;
 }
 
 export function stateList(events) {
-  const set = new Set();
-  (events || []).forEach((e) => {
-    if (e?.state) set.add(e.state);
-  });
-  return Array.from(set).sort();
+  const states = new Set();
+  for (const e of events || []) {
+    if (e?.state) states.add(e.state);
+  }
+  return Array.from(states).sort();
+}
+
+export function escapeHtml(text) {
+  const s = String(text ?? "");
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
