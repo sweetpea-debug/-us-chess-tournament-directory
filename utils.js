@@ -1,35 +1,37 @@
-// utils.js
+export const CACHE_KEY = "us-chess-radar-events-v1";
+export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-export function formatDateRange(startISO, endISO) {
-  if (!startISO) return "";
-  const start = new Date(startISO);
-  const end = endISO ? new Date(endISO) : start;
+export function formatDateRange(start, end) {
+  if (!start) return "";
 
-  const sameDay =
-    start.getFullYear() === end.getFullYear() &&
-    start.getMonth() === end.getMonth() &&
-    start.getDate() === end.getDate();
+  const options = { month: "short", day: "numeric", year: "numeric" };
+  const startLabel = new Date(start).toLocaleDateString(undefined, options);
 
-  const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+  if (!end || start === end) {
+    return startLabel;
+  }
 
-  if (sameDay) return fmt.format(start);
-  return `${fmt.format(start)} – ${fmt.format(end)}`;
+  const endLabel = new Date(end).toLocaleDateString(undefined, options);
+  return `${startLabel} – ${endLabel}`;
+}
+
+export function readStorage(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function writeStorage(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
 }
 
 export function stateList(events) {
-  const states = new Set();
-  for (const e of events || []) {
-    if (e?.state) states.add(e.state);
-  }
-  return Array.from(states).sort();
-}
-
-export function escapeHtml(text) {
-  const s = String(text ?? "");
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+  return [...new Set((events || []).map((event) => event.state).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b)
+  );
 }
