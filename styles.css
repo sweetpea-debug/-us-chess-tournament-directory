@@ -33,7 +33,8 @@ body {
 .hero,
 .hero h1,
 .hero p,
-.hero span {
+.hero span,
+.hero button {
   color: #f4f8ff;
 }
 
@@ -64,11 +65,10 @@ body {
   align-items: center;
 }
 
-.layout {
+.stack {
   margin-top: 1.2rem;
   margin-bottom: 2rem;
   display: grid;
-  grid-template-columns: 1fr;
   gap: 1rem;
 }
 
@@ -162,17 +162,19 @@ select {
 .back-link {
   text-decoration: none;
   font-weight: 600;
+}
+
+a {
   color: #114dba;
 }
 
 .source-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--panel-soft);
+  white-space: pre-wrap; /* keep line breaks, wrap long lines */
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 0.85rem;
-  line-height: 1.35;
-  max-height: 70vh;
+  background: var(--panel-soft);
+  padding: 0.9rem;
   overflow: auto;
+  line-height: 1.35;
+  font-size: 0.95rem;
 }
