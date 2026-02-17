@@ -19,12 +19,12 @@
           Daily ingest from federation/organizer listings. Filter by state and open any event to see the full source text.
         </p>
         <div class="hero__meta">
-          <span id="sync-label">Last sync: …</span>
+          <span id="sync-label">Last sync: never</span>
         </div>
       </div>
     </header>
 
-    <main class="container stack">
+    <main class="container layout">
       <section class="panel" aria-label="Filters">
         <h2>Filters</h2>
 
@@ -56,6 +56,48 @@
         <button type="button" class="btn card__open">Open details</button>
       </article>
     </template>
+
+    <script>
+      window.__radarBooted = false;
+      window.setTimeout(() => {
+        if (window.__radarBooted) return;
+
+        const status = document.getElementById("status-message");
+        const resultCount = document.getElementById("result-count");
+        const cards = document.getElementById("cards");
+
+        if (status) {
+          status.textContent =
+            "The app script did not load. Confirm app.js and utils.js exist in the repo root and contain plain JavaScript (no extra markdown text).";
+        }
+        if (resultCount) {
+          resultCount.textContent = "Startup error";
+        }
+        if (cards && !cards.children.length) {
+          cards.innerHTML =
+            '<p class="muted">No cards rendered yet. This usually means a JavaScript file was pasted with extra text or has a syntax error.</p>';
+        }
+      }, 2500);
+
+      window.addEventListener("error", (event) => {
+        if (window.__radarBooted) return;
+
+        const status = document.getElementById("status-message");
+        const resultCount = document.getElementById("result-count");
+        const cards = document.getElementById("cards");
+        const locationHint = event.filename ? `${event.filename}:${event.lineno || "?"}` : "unknown file";
+
+        if (status) {
+          status.textContent = `JavaScript error before startup (${locationHint}). Check app.js/utils.js for syntax errors.`;
+        }
+        if (resultCount) {
+          resultCount.textContent = "Startup error";
+        }
+        if (cards && !cards.children.length) {
+          cards.innerHTML = `<p class="muted">Startup failed: ${event.message || "Unknown JavaScript error"}</p>`;
+        }
+      });
+    </script>
 
     <script type="module" src="app.js"></script>
   </body>
