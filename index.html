@@ -6,7 +6,7 @@
     <title>US Chess Tournament Radar</title>
     <meta
       name="description"
-      content="Daily-updating United States chess tournament directory. Filter by state and open any event to see the full source text."
+      content="Daily-updating United States chess tournament directory. Filter by state and open any event to see source text."
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -24,7 +24,7 @@
       </div>
     </header>
 
-    <main class="container layout">
+    <main class="container">
       <section class="panel" aria-label="Filters">
         <h2>Filters</h2>
 
@@ -66,16 +66,10 @@
         const resultCount = document.getElementById("result-count");
         const cards = document.getElementById("cards");
 
-        if (status) {
-          status.textContent =
-            "The app script did not load. Confirm app.js and utils.js exist in the repo root and contain plain JavaScript (no extra markdown text).";
-        }
-        if (resultCount) {
-          resultCount.textContent = "Startup error";
-        }
+        if (status) status.textContent = "The app script did not load. Re-copy app.js, data.js, and utils.js as full files.";
+        if (resultCount) resultCount.textContent = "Data did not load";
         if (cards && !cards.children.length) {
-          cards.innerHTML =
-            '<p class="muted">No cards rendered yet. This usually means a JavaScript file was pasted with extra text or has a syntax error.</p>';
+          cards.innerHTML = '<p class="muted">No cards rendered yet. This usually means one JS file was pasted with extra markdown text.</p>';
         }
       }, 2500);
 
@@ -87,12 +81,8 @@
         const cards = document.getElementById("cards");
         const locationHint = event.filename ? `${event.filename}:${event.lineno || "?"}` : "unknown file";
 
-        if (status) {
-          status.textContent = `JavaScript error before startup (${locationHint}). Check app.js/utils.js for syntax errors.`;
-        }
-        if (resultCount) {
-          resultCount.textContent = "Startup error";
-        }
+        if (status) status.textContent = `JavaScript error before startup (${locationHint}). Re-copy app.js, data.js, and utils.js as plain file text only.`;
+        if (resultCount) resultCount.textContent = "Startup error";
         if (cards && !cards.children.length) {
           cards.innerHTML = `<p class="muted">Startup failed: ${event.message || "Unknown JavaScript error"}</p>`;
         }
