@@ -1,47 +1,52 @@
 #!/usr/bin/env python3
 """
-Build events.json for GitHub Pages.
+Daily ingest for chess tournaments (streamlined).
 
-Output: repo-root events.json
-{
-  "syncedAt": "<iso>",
-  "events": [
-    {
-      "id": "...",
-      "name": "...",
-      "startDate": "YYYY-MM-DD",
-      "endDate": "YYYY-MM-DD",
-      "city": "...",
-      "state": "MI",
-      "sourceId": "uschess-upcoming" | "michess",
-      "sourceUrl": "https://...",
-      "sourceText": "multiline\\ntext..."
-    }
-  ]
-}
+Goal:
+- Cards show: name, date(s), city/state.
+- Detail page shows: cleaned "sourceText" + link to official listing.
 
-Design goal (per request):
-- Cards show only: name, date(s), city/state
-- Details page shows: full sourceText + link to sourceUrl
-- No lat/lon, no proximity filtering
-- Standard library only
+Sources:
+- US Chess (new.uschess.org/upcoming-tournaments) + event detail pages
+- Michigan Chess Association (michess.org/events) + /event-details/... pages
+
+Output:
+- repo-root events.json:
+  {
+    "syncedAt": "<iso>",
+    "events": [
+      {
+        "id": "...",
+        "name": "...",
+        "startDate": "YYYY-MM-DD",
+        "endDate": "YYYY-MM-DD",
+        "city": "...",
+        "state": "XX",
+        "sourceId": "...",
+        "sourceUrl": "...",
+        "sourceText": "...\n...\n..."
+      }
+    ]
+  }
+
+Performance:
+- Listing pages are fast; detail pages can be many.
+- We cache sourceText from previous events.json and only refetch missing/new ones.
+- We fetch detail pages concurrently.
 """
 
 from __future__ import annotations
 
-import html
+import html as htmllib
 import json
-import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
-
 
 # ----------------------------
 # Paths
@@ -51,42 +56,22 @@ HERE = Path(__file__).resolve()
 ROOT = HERE.parents[1] if HERE.parent.name == "scripts" else HERE.parent
 OUTPUT_PATH = ROOT / "events.json"
 
-
 # ----------------------------
 # Config
 # ----------------------------
 
 DEFAULT_TIMEOUT_SECS = 25
-USER_AGENT = "Mozilla/5.0 (compatible; TournamentRadarBot/1.0; +https://github.com/)"
+USER_AGENT = "Mozilla/5.0 (compatible; TournamentRadarBot/1.0)"
+MAX_WORKERS = 10
 
-MAX_WORKERS = int(os.getenv("RADAR_WORKERS", "10"))
-# For testing: RADAR_LIMIT=50 (limits total events per source)
-LIMIT = int(os.getenv("RADAR_LIMIT", "0"))  # 0 = no limit
-MAX_SOURCE_TEXT_CHARS = int(os.getenv("RADAR_MAX_TEXT", "28000"))
+# To keep the first-ever run from taking forever, you can cap how many NEW pages
+# get enriched per run. Set to None for no cap.
+MAX_NEW_ENRICH = None  # e.g. 300 if you want a hard cap
 
-SOURCE_CATALOG: list[dict[str, Any]] = [
-    {
-        "id": "uschess-upcoming",
-        "name": "US Chess Upcoming Tournaments",
-        "homepage": "https://new.uschess.org/upcoming-tournaments",
-    },
-    {
-        "id": "michess",
-        "name": "Michigan Chess Association",
-        "homepage": "https://www.michess.org/events",
-    },
-]
-
-
-US_STATE_ABBR = {
-    "alabama":"AL","alaska":"AK","arizona":"AZ","arkansas":"AR","california":"CA","colorado":"CO","connecticut":"CT",
-    "delaware":"DE","florida":"FL","georgia":"GA","hawaii":"HI","idaho":"ID","illinois":"IL","indiana":"IN",
-    "iowa":"IA","kansas":"KS","kentucky":"KY","louisiana":"LA","maine":"ME","maryland":"MD","massachusetts":"MA",
-    "michigan":"MI","minnesota":"MN","mississippi":"MS","missouri":"MO","montana":"MT","nebraska":"NE","nevada":"NV",
-    "new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND",
-    "ohio":"OH","oklahoma":"OK","oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC",
-    "south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT","virginia":"VA","washington":"WA",
-    "west virginia":"WV","wisconsin":"WI","wyoming":"WY","district of columbia":"DC",
+US_STATES = {
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN",
+    "MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA",
+    "WA","WV","WI","WY","DC"
 }
 
 MONTHS = {
@@ -99,6 +84,20 @@ MONTHS_ABBR = {
     "jul": 7, "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12
 }
 
+SOURCE_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "uschess",
+        "name": "US Chess",
+        "listing": "https://new.uschess.org/upcoming-tournaments",
+        "homepage": "https://new.uschess.org/upcoming-tournaments",
+    },
+    {
+        "id": "michess",
+        "name": "Michigan Chess Association",
+        "listing": "https://www.michess.org/events",
+        "homepage": "https://www.michess.org/events",
+    },
+]
 
 # ----------------------------
 # HTTP
@@ -122,58 +121,30 @@ def fetch_text(url: str) -> str:
     except (HTTPError, URLError) as e:
         raise RuntimeError(f"Fetch failed for {url}: {e}") from e
 
-
 # ----------------------------
-# HTML -> Lines / SourceText
+# HTML -> text helpers
 # ----------------------------
-
-BLOCK_END_TAGS = r"(p|div|li|h1|h2|h3|h4|h5|tr|td|th|section|article|header|footer|br)"
 
 def _strip_html_to_lines(markup: str) -> list[str]:
+    # remove script/style
     markup = re.sub(r"<script\b[^>]*>.*?</script>", " ", markup, flags=re.I | re.S)
     markup = re.sub(r"<style\b[^>]*>.*?</style>", " ", markup, flags=re.I | re.S)
 
-    markup = re.sub(rf"</{BLOCK_END_TAGS}\s*>", "\n", markup, flags=re.I)
+    # add line breaks for block-ish elements
+    markup = re.sub(r"</(p|div|li|h1|h2|h3|h4|h5|tr|td|th|section|article|header|footer|main)\s*>", "\n", markup, flags=re.I)
     markup = re.sub(r"<br\s*/?>", "\n", markup, flags=re.I)
 
+    # drop tags
     text = re.sub(r"<[^>]+>", " ", markup)
-    text = html.unescape(text)
+    text = htmllib.unescape(text)
 
+    # normalize lines
     lines: list[str] = []
     for raw in text.splitlines():
-        line = re.sub(r"\s+", " ", raw).strip()
-        if line:
-            lines.append(line)
+        ln = re.sub(r"\s+", " ", raw).strip()
+        if ln:
+            lines.append(ln)
     return lines
-
-def html_to_source_text(markup: str) -> str:
-    """
-    Turn a page into readable multiline text.
-    This is intentionally simple, but preserves line breaks.
-    """
-    lines = _strip_html_to_lines(markup)
-
-    # Remove some ultra-common nav noise
-    noise = {
-        "skip to main content", "donate", "login", "privacy policy", "terms of use",
-        "facebook", "twitter", "youtube", "instagram", "rss",
-    }
-    cleaned: list[str] = []
-    for ln in lines:
-        low = ln.lower()
-        if any(n in low for n in noise) and len(ln) < 80:
-            continue
-        cleaned.append(ln)
-
-    text = "\n".join(cleaned).strip()
-    if len(text) > MAX_SOURCE_TEXT_CHARS:
-        text = text[:MAX_SOURCE_TEXT_CHARS].rstrip() + "\n\n[truncated]"
-    return text
-
-
-# ----------------------------
-# Generic helpers
-# ----------------------------
 
 def sanitize_slug(value: str) -> str:
     value = value.lower().strip()
@@ -181,22 +152,21 @@ def sanitize_slug(value: str) -> str:
     value = re.sub(r"-+", "-", value).strip("-")
     return value[:80] if value else "event"
 
-def dedupe(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: set[str] = set()
-    out: list[dict[str, Any]] = []
-    for e in events:
-        key = f"{e.get('name','')}|{e.get('startDate','')}|{e.get('city','')}|{e.get('state','')}|{e.get('sourceId','')}"
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(e)
-    return out
-
 def is_upcoming(event: dict[str, Any]) -> bool:
     today = date.today().isoformat()
     end_date = str(event.get("endDate") or "")
     return bool(end_date) and end_date >= today
 
+def dedupe(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for e in events:
+        key = f"{e.get('sourceId','')}|{e.get('sourceUrl','')}|{e.get('startDate','')}|{e.get('name','')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
 
 # ----------------------------
 # Date parsing
@@ -204,7 +174,7 @@ def is_upcoming(event: dict[str, Any]) -> bool:
 
 def _parse_us_chess_date_one(s: str) -> date | None:
     s = s.strip()
-    s = re.sub(r"^[A-Za-z]+,\s*", "", s)  # drop weekday
+    s = re.sub(r"^[A-Za-z]+,\s*", "", s)  # remove weekday
     m = re.match(r"^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$", s)
     if not m:
         return None
@@ -227,147 +197,220 @@ def _parse_us_chess_date_range(s: str) -> tuple[str, str] | None:
     end = _parse_us_chess_date_one(parts[1]) if len(parts) > 1 else start
     if not end:
         end = start
-    return (start.isoformat(), end.isoformat())
+    return start.isoformat(), end.isoformat()
 
+def _infer_year_from_title_or_now(title: str) -> int:
+    m = re.search(r"\b(20\d{2})\b", title)
+    if m:
+        return int(m.group(1))
+    return date.today().year
 
-def _parse_location_flexible(loc: str) -> tuple[str, str] | None:
-    """
-    Accept:
-      - 'City, StateName'
-      - 'City, ST'
-      - 'City, ST, StateName'
-    """
-    parts = [p.strip() for p in loc.split(",") if p.strip()]
-    if len(parts) == 2:
-        city, s2 = parts
-        if re.fullmatch(r"[A-Z]{2}", s2):
-            return city, s2
-        abbr = US_STATE_ABBR.get(s2.lower())
-        return (city, abbr) if abbr else None
+def _parse_michess_date_range(line: str, title: str) -> tuple[str, str] | None:
+    # Example: "Fri, Feb 20 - Sun, Feb 22"
+    s = line.strip()
+    m = re.match(
+        r"^[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})\s*-\s*[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})$",
+        s
+    )
+    if not m:
+        return None
+    mon1 = MONTHS_ABBR.get(m.group(1).lower())
+    mon2 = MONTHS_ABBR.get(m.group(3).lower())
+    if not mon1 or not mon2:
+        return None
+    d1 = int(m.group(2))
+    d2 = int(m.group(4))
+    y = _infer_year_from_title_or_now(title)
+    try:
+        start = date(y, mon1, d1)
+        end = date(y, mon2, d2)
+        if end < start:
+            end = start
+        return start.isoformat(), end.isoformat()
+    except ValueError:
+        return None
 
-    if len(parts) >= 3:
-        city = parts[0]
-        mid = parts[1]
-        last = parts[-1]
-        if re.fullmatch(r"[A-Z]{2}", mid):
-            return city, mid
-        abbr = US_STATE_ABBR.get(last.lower())
-        return (city, abbr) if abbr else None
+# ----------------------------
+# Extract title + location (City, ST)
+# ----------------------------
 
+def _extract_h1(html: str) -> str:
+    m = re.search(r"<h1[^>]*>(.*?)</h1>", html, flags=re.I | re.S)
+    if not m:
+        return ""
+    text = re.sub(r"<[^>]+>", " ", m.group(1))
+    text = htmllib.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+def _extract_city_state_from_text(text: str) -> tuple[str, str] | None:
+    # first reasonable City, ST match
+    for m in re.finditer(r"\b([A-Za-z][A-Za-z .'\-]{1,60}?),\s*([A-Z]{2})\b", text):
+        city = m.group(1).strip()
+        st = m.group(2).strip()
+        if st in US_STATES:
+            return city, st
     return None
 
+# ----------------------------
+# Clean source text (remove nav/menu boilerplate)
+# ----------------------------
+
+USCHESS_NOISE = {
+    "Skip to main content",
+    "US Chess.org",
+    "User account menu",
+    "Find a Club",
+    "Donate",
+    "About",
+    "Mission and Vision",
+    "Governance",
+    "Annual Reports",
+    "Complaints Procedures",
+    "Delegates Information",
+    "Documents and Policies",
+    "Financials",
+    "Executive Board",
+    "Staff/Contact Us",
+    "FAQs",
+    "Job Postings",
+    "Helpful Guides",
+    "Privacy Policy",
+    "Terms of Use",
+}
+
+def _extract_main_block(html: str) -> str:
+    # Prefer <main>...</main>, else <article>...</article>, else full page.
+    m = re.search(r"<main\b[^>]*>(.*?)</main>", html, flags=re.I | re.S)
+    if m:
+        return m.group(1)
+    m = re.search(r"<article\b[^>]*>(.*?)</article>", html, flags=re.I | re.S)
+    if m:
+        return m.group(1)
+    return html
+
+def clean_source_text(html: str, title_hint: str) -> str:
+    block = _extract_main_block(html)
+    lines = _strip_html_to_lines(block)
+
+    # If title exists in lines, start from it to cut off a lot of header garbage.
+    start_idx = 0
+    if title_hint:
+        low_hint = title_hint.lower()
+        for i, ln in enumerate(lines[:250]):
+            if low_hint == ln.lower() or low_hint in ln.lower():
+                start_idx = i
+                break
+    lines = lines[start_idx:]
+
+    cleaned: list[str] = []
+    for ln in lines:
+        if ln in USCHESS_NOISE:
+            continue
+        if re.fullmatch(r"©\s*\d{4}.*", ln):
+            break
+        if ln.lower().startswith("copyright"):
+            break
+        cleaned.append(ln)
+
+    # Deduplicate consecutive identical lines
+    out: list[str] = []
+    prev = None
+    for ln in cleaned:
+        if ln == prev:
+            continue
+        prev = ln
+        out.append(ln)
+
+    # Keep it a reasonable size so events.json doesn't explode
+    text = "\n".join(out).strip()
+    if len(text) > 12000:
+        text = text[:12000].rstrip() + "\n…"
+    return text
 
 # ----------------------------
-# US Chess: listing scrape
+# US Chess: listing -> events
 # ----------------------------
 
-def _uschess_extract_cards(page_html: str, base_url: str) -> list[dict[str, Any]]:
+def parse_uschess_listing(page_html: str, base_url: str) -> list[dict[str, Any]]:
     """
-    Extract event URL + title from <h3><a href="...">TITLE</a></h3> then
-    use text-lines around it to find location and date.
-    """
-    lines = _strip_html_to_lines(page_html)
+    Extract events from the Upcoming Tournaments listing page.
 
-    # map title->url from h3/a
-    title_url: dict[str, str] = {}
-    for href, inner in re.findall(
-        r"<h3[^>]*>\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>",
-        page_html,
-        flags=re.I | re.S,
-    ):
-        title = html.unescape(re.sub(r"<[^>]+>", " ", inner))
+    We rely on:
+    - event links in <a href="..."> inside headings/cards
+    - nearby plain-text lines include location and date range
+    """
+    # Link map by title (best-effort)
+    title_to_url: dict[str, str] = {}
+    for href, inner in re.findall(r"<h3[^>]*>\s*<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>", page_html, flags=re.I | re.S):
+        title = htmllib.unescape(re.sub(r"<[^>]+>", " ", inner))
         title = re.sub(r"\s+", " ", title).strip()
         if title:
-            title_url[title] = urljoin(base_url, href)
+            title_to_url[title.lower()] = urljoin(base_url, href)
 
-    out: list[dict[str, Any]] = []
+    lines = _strip_html_to_lines(page_html)
 
-    # heuristic: the page lines contain "### Title" blocks on many renders,
-    # but to keep stable we just scan for title occurrences and look ahead.
-    for i, ln in enumerate(lines):
-        title = ln.strip()
-        if title not in title_url:
-            continue
-
-        # look ahead for location/date
-        loc = None
-        dr = None
-        for j in range(i + 1, min(i + 12, len(lines))):
-            if loc is None:
-                loc_try = _parse_location_flexible(lines[j])
-                if loc_try:
-                    loc = loc_try
-                    continue
-            if dr is None:
-                dr_try = _parse_us_chess_date_range(lines[j])
-                if dr_try:
-                    dr = dr_try
-                    continue
-
-        if not loc or not dr:
-            continue
-
-        city, state = loc
-        startDate, endDate = dr
-
-        out.append(
-            {
-                "name": title,
-                "startDate": startDate,
-                "endDate": endDate,
-                "city": city,
-                "state": state,
-                "sourceUrl": title_url[title],
-            }
-        )
-
-    return out
-
-
-def fetch_uschess_events() -> list[dict[str, Any]]:
-    base = "https://new.uschess.org/upcoming-tournaments"
     events: list[dict[str, Any]] = []
+    # Heuristic: blocks look like:
+    # ### Title
+    # City, ST, StateName
+    # Saturday, January 3, 2026 - Sunday, January 4, 2026
+    for i in range(0, len(lines) - 3):
+        if not lines[i].startswith("###"):
+            continue
 
+        title = re.sub(r"^#+\s*", "", lines[i]).strip()
+        if len(title) < 4:
+            continue
+
+        loc_line = lines[i + 1].strip()
+        date_line = lines[i + 2].strip()
+
+        dr = _parse_us_chess_date_range(date_line)
+        if not dr:
+            continue
+
+        # location can be "City, ST, StateName" or "City, ST"
+        loc = _extract_city_state_from_text(loc_line)
+        if not loc:
+            continue
+        city, st = loc
+
+        startDate, endDate = dr
+        url = title_to_url.get(title.lower(), base_url)
+
+        events.append({
+            "id": f"uschess-{sanitize_slug(title)}-{startDate}",
+            "name": title,
+            "startDate": startDate,
+            "endDate": endDate,
+            "city": city,
+            "state": st,
+            "sourceId": "uschess",
+            "sourceUrl": url,
+            "sourceText": "",  # filled in later
+        })
+
+    return events
+
+def fetch_uschess_all() -> list[dict[str, Any]]:
+    base = "https://new.uschess.org/upcoming-tournaments"
+    all_events: list[dict[str, Any]] = []
     for page in range(0, 80):
         url = base if page == 0 else f"{base}?page={page}"
-        html_text = fetch_text(url)
-        page_events = _uschess_extract_cards(html_text, base)
-
-        print(f"[uschess-upcoming] page={page} cards={len(page_events)}")
-
-        if not page_events and page > 0:
+        html = fetch_text(url)
+        chunk = parse_uschess_listing(html, base)
+        print(f"[uschess] page={page} parsed={len(chunk)}")
+        if not chunk and page > 0:
             break
-
-        events.extend(page_events)
-
-        if LIMIT and len(events) >= LIMIT:
-            events = events[:LIMIT]
-            break
-
-    # attach ids/sourceId
-    finalized: list[dict[str, Any]] = []
-    for e in events:
-        finalized.append(
-            {
-                "id": f"uschess-upcoming-{sanitize_slug(e['name'])}-{e['startDate']}",
-                "name": e["name"],
-                "startDate": e["startDate"],
-                "endDate": e["endDate"],
-                "city": e["city"],
-                "state": e["state"],
-                "sourceId": "uschess-upcoming",
-                "sourceUrl": e["sourceUrl"],
-                "sourceText": "",  # filled in later
-            }
-        )
-    return finalized
-
+        all_events.extend(chunk)
+    return all_events
 
 # ----------------------------
-# Michess: listing -> detail URLs -> parse basics
+# Michess: listing -> detail urls -> events
 # ----------------------------
 
-def _michess_extract_detail_urls(listing_html: str, base_url: str) -> list[str]:
+def michess_extract_detail_urls(listing_html: str, base_url: str) -> list[str]:
     urls: set[str] = set()
 
     for href in re.findall(r'href=["\'](/event-details/[^"\']+)["\']', listing_html, flags=re.I):
@@ -381,202 +424,177 @@ def _michess_extract_detail_urls(listing_html: str, base_url: str) -> list[str]:
 
     return sorted(urls)
 
-def _michess_title_from_html(detail_html: str) -> str:
-    # Prefer <meta property="og:title">
-    m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', detail_html, flags=re.I)
-    if m:
-        t = html.unescape(m.group(1)).strip()
-        if t:
-            return t
+def parse_michess_detail(detail_html: str, url: str) -> dict[str, Any] | None:
+    title = _extract_h1(detail_html)
+    if not title:
+        # fallback: first meaningful line in main block
+        lines = _strip_html_to_lines(_extract_main_block(detail_html))
+        title = lines[0] if lines else ""
+    if not title:
+        return None
 
-    # Then <title>
-    m = re.search(r"<title[^>]*>(.*?)</title>", detail_html, flags=re.I | re.S)
-    if m:
-        t = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()
-        t = re.sub(r"\s*\|\s*Michigan Chess Association.*$", "", t, flags=re.I).strip()
-        if t and len(t) > 4:
-            return t
+    block = _extract_main_block(detail_html)
+    lines = _strip_html_to_lines(block)
 
-    # Then first <h1>
-    m = re.search(r"<h1[^>]*>(.*?)</h1>", detail_html, flags=re.I | re.S)
-    if m:
-        t = html.unescape(re.sub(r"<[^>]+>", " ", m.group(1)))
-        t = re.sub(r"\s+", " ", t).strip()
-        if t and len(t) > 4:
-            return t
+    # date range
+    startDate = endDate = None
+    for ln in lines[:200]:
+        dr = _parse_michess_date_range(ln, title)
+        if dr:
+            startDate, endDate = dr
+            break
 
-    return ""
+    if not startDate:
+        # some michess pages have single date with year; try a fallback
+        # Example: "Feb 17, 2026"
+        for ln in lines[:200]:
+            m = re.search(r"\b([A-Za-z]{3})\s+(\d{1,2}),\s*(20\d{2})\b", ln)
+            if m:
+                mon = MONTHS_ABBR.get(m.group(1).lower())
+                if mon:
+                    try:
+                        d = date(int(m.group(3)), mon, int(m.group(2)))
+                        startDate = d.isoformat()
+                        endDate = startDate
+                        break
+                    except ValueError:
+                        pass
+    if not startDate:
+        return None
 
-def _michess_parse_city_state(lines: list[str]) -> tuple[str, str]:
-    # Look for "... City, ST ... United States"
+    # city/state
+    city = "Unknown"
+    st = "MI"
     for ln in lines[:250]:
-        if "United States" in ln and "," in ln:
-            mloc = re.search(r"\b([A-Za-z .'-]+),\s*([A-Z]{2})\b", ln)
-            if mloc:
-                return (mloc.group(1).strip(), mloc.group(2).strip())
-    return ("Unknown", "MI")
+        loc = _extract_city_state_from_text(ln)
+        if loc:
+            city, st = loc
+            break
 
-def _michess_parse_date_range(lines: list[str], title: str) -> tuple[str, str] | None:
-    # Try explicit "Feb 16, 2026" or "Fri, Feb 20 - Sun, Feb 22"
-    for ln in lines[:160]:
-        # Single: "Feb 16, 2026"
-        m1 = re.search(r"\b([A-Za-z]{3,9})\s+(\d{1,2}),\s*(20\d{2})\b", ln)
-        if m1:
-            mon = MONTHS.get(m1.group(1).lower())
-            if mon:
-                try:
-                    d = date(int(m1.group(3)), mon, int(m1.group(2)))
-                    return (d.isoformat(), d.isoformat())
-                except ValueError:
-                    pass
+    source_text = clean_source_text(detail_html, title)
 
-        # Range: "Fri, Feb 20 - Sun, Feb 22" (infer year)
-        m2 = re.match(
-            r"^[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})\s*-\s*[A-Za-z]{3},\s*([A-Za-z]{3})\s*(\d{1,2})$",
-            ln.strip()
-        )
-        if m2:
-            mon1 = MONTHS_ABBR.get(m2.group(1).lower())
-            mon2 = MONTHS_ABBR.get(m2.group(3).lower())
-            if not mon1 or not mon2:
-                continue
-            year = date.today().year
-            m_year = re.search(r"\b(20\d{2})\b", title)
-            if m_year:
-                year = int(m_year.group(1))
-            try:
-                start = date(year, mon1, int(m2.group(2)))
-                end = date(year, mon2, int(m2.group(4)))
-                if end < start:
-                    end = start
-                return (start.isoformat(), end.isoformat())
-            except ValueError:
-                pass
+    return {
+        "id": f"michess-{sanitize_slug(title)}-{startDate}",
+        "name": title,
+        "startDate": startDate,
+        "endDate": endDate or startDate,
+        "city": city,
+        "state": st,
+        "sourceId": "michess",
+        "sourceUrl": url,
+        "sourceText": source_text,
+    }
 
-    return None
-
-def fetch_michess_events() -> list[dict[str, Any]]:
+def fetch_michess_all() -> list[dict[str, Any]]:
     listing_url = "https://www.michess.org/events"
     listing_html = fetch_text(listing_url)
-    urls = _michess_extract_detail_urls(listing_html, listing_url)
-
+    urls = michess_extract_detail_urls(listing_html, listing_url)
     print(f"[michess] found {len(urls)} event-details urls")
 
-    if LIMIT:
-        urls = urls[:LIMIT]
-
-    events: list[dict[str, Any]] = []
-    for u in urls:
-        events.append(
-            {
-                "id": "",  # fill after parse
-                "name": "",
-                "startDate": "",
-                "endDate": "",
-                "city": "Unknown",
-                "state": "MI",
-                "sourceId": "michess",
-                "sourceUrl": u,
-                "sourceText": "",
-            }
-        )
-    return events
-
-
-# ----------------------------
-# Enrichment: fetch each event page -> fill sourceText (+ Michess basics)
-# ----------------------------
-
-def enrich_event(event: dict[str, Any]) -> dict[str, Any]:
-    url = event["sourceUrl"]
-    html_text = fetch_text(url)
-    source_text = html_to_source_text(html_text)
-    event["sourceText"] = source_text
-
-    if event["sourceId"] == "michess":
-        title = _michess_title_from_html(html_text)
-        if title:
-            event["name"] = title
-
-        lines = _strip_html_to_lines(html_text)
-        dr = _michess_parse_date_range(lines, event.get("name") or "")
-        if dr:
-            event["startDate"], event["endDate"] = dr
-
-        city, state = _michess_parse_city_state(lines)
-        event["city"] = city
-        event["state"] = state or "MI"
-
-        if event["startDate"]:
-            event["id"] = f"michess-{sanitize_slug(event['name'] or 'event')}-{event['startDate']}"
-
-    return event
-
-
-def enrich_events(events: list[dict[str, Any]], label: str) -> list[dict[str, Any]]:
-    if not events:
-        return []
-
     out: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        fut_map = {ex.submit(enrich_event, e): e for e in events}
-        done = 0
-        total = len(fut_map)
-
-        for fut in as_completed(fut_map):
-            done += 1
-            if done % 25 == 0 or done == total:
-                print(f"[{label}] enriching {done}/{total} ...")
-
-            try:
-                ev = fut.result()
+    for u in urls:
+        try:
+            html = fetch_text(u)
+            ev = parse_michess_detail(html, u)
+            if ev:
                 out.append(ev)
-            except Exception as e:
-                base = fut_map[fut]
-                print(f"[{label}] FAILED {base.get('sourceUrl')}: {e}")
-
+        except Exception as e:
+            print(f"[michess] detail failed {u}: {e}")
     return out
 
+# ----------------------------
+# Enrichment (US Chess detail pages)
+# ----------------------------
+
+def enrich_event_source_text(event: dict[str, Any]) -> dict[str, Any]:
+    url = event["sourceUrl"]
+    html = fetch_text(url)
+
+    # Use H1 as best title hint, else event.name
+    title_hint = _extract_h1(html) or event.get("name", "")
+    event["sourceText"] = clean_source_text(html, title_hint)
+    return event
+
+def load_previous_cache() -> dict[str, str]:
+    """
+    Map sourceUrl -> sourceText from existing events.json.
+    """
+    if not OUTPUT_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
+        events = payload.get("events", [])
+        cache: dict[str, str] = {}
+        for e in events:
+            url = e.get("sourceUrl")
+            txt = e.get("sourceText")
+            if isinstance(url, str) and isinstance(txt, str) and txt.strip():
+                cache[url] = txt
+        return cache
+    except Exception:
+        return {}
 
 # ----------------------------
 # Main
 # ----------------------------
 
 def main() -> None:
-    all_events: list[dict[str, Any]] = []
+    prev_cache = load_previous_cache()
+    if prev_cache:
+        print(f"[cache] loaded {len(prev_cache)} cached sourceText entries from existing events.json")
 
-    # US Chess
-    us_events = fetch_uschess_events()
-    print(f"[uschess-upcoming] fetched {len(us_events)} listing events")
-    us_events = enrich_events(us_events, "uschess-upcoming")
-    all_events.extend(us_events)
+    # Fetch listings
+    us_events = fetch_uschess_all()
+    mi_events = fetch_michess_all()
 
-    # Michess (listing gives URLs; enrichment parses title/date/location)
-    mi_events = fetch_michess_events()
-    print(f"[michess] fetched {len(mi_events)} listing urls")
-    mi_events = enrich_events(mi_events, "michess")
-    all_events.extend(mi_events)
-
-    # keep only events with a valid date
-    all_events = [e for e in all_events if e.get("startDate") and e.get("endDate")]
-
-    # upcoming only
-    all_events = [e for e in all_events if is_upcoming(e)]
-
-    # dedupe
+    # Filter upcoming + dedupe early
+    all_events = [e for e in (us_events + mi_events) if is_upcoming(e)]
     all_events = dedupe(all_events)
 
-    # sort
-    all_events.sort(key=lambda e: (e["startDate"], e.get("state", ""), e.get("name", "")))
+    # Apply cached sourceText where available
+    new_to_enrich: list[dict[str, Any]] = []
+    for e in all_events:
+        url = e.get("sourceUrl", "")
+        if url in prev_cache and prev_cache[url].strip():
+            e["sourceText"] = prev_cache[url]
+        else:
+            # Only US Chess events need enrichment (michess already includes sourceText from detail page)
+            if e.get("sourceId") == "uschess":
+                new_to_enrich.append(e)
+
+    if MAX_NEW_ENRICH is not None:
+        new_to_enrich = new_to_enrich[:MAX_NEW_ENRICH]
+
+    print(f"[uschess] total upcoming={sum(1 for e in all_events if e.get('sourceId')=='uschess')}")
+    print(f"[uschess] need enrichment={len(new_to_enrich)}")
+
+    # Enrich US Chess in parallel
+    if new_to_enrich:
+        enriched: list[dict[str, Any]] = []
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+            futures = {ex.submit(enrich_event_source_text, e): e for e in new_to_enrich}
+            done = 0
+            total = len(futures)
+            for fut in as_completed(futures):
+                done += 1
+                if done % 25 == 0 or done == total:
+                    print(f"[uschess] enriching {done}/{total} ...")
+                try:
+                    enriched.append(fut.result())
+                except Exception as err:
+                    e = futures[fut]
+                    print(f"[uschess] enrich FAILED url={e.get('sourceUrl')}: {err}")
+
+    # Final sort by startDate
+    all_events.sort(key=lambda e: e.get("startDate", "9999-12-31"))
 
     payload = {
         "syncedAt": datetime.now(timezone.utc).isoformat(),
         "events": all_events,
     }
 
-    OUTPUT_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    OUTPUT_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"Wrote {OUTPUT_PATH} with {len(all_events)} events")
-
 
 if __name__ == "__main__":
     main()
