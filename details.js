@@ -2,15 +2,6 @@ import { formatDateRange } from "./utils.js";
 
 const detailsRoot = document.getElementById("details");
 
-function escapeHtml(str) {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 function missingView() {
   detailsRoot.innerHTML = `
     <h1>Tournament not found</h1>
@@ -19,21 +10,26 @@ function missingView() {
 }
 
 function renderTournament(event) {
-  const sourceText = event.sourceText ? escapeHtml(event.sourceText) : "No source text available.";
+  const safeName = event.name || "Untitled event";
+  const dates = formatDateRange(event.startDate, event.endDate);
+  const location = `${event.city || "Unknown"}, ${event.state || "US"}`;
+  const url = event.sourceUrl || "#";
 
   detailsRoot.innerHTML = `
-    <h1>${escapeHtml(event.name)}</h1>
+    <h1>${safeName}</h1>
 
-    <p><strong>Dates:</strong> ${escapeHtml(formatDateRange(event.startDate, event.endDate))}</p>
-    <p><strong>Location:</strong> ${escapeHtml(`${event.city}, ${event.state}`)}</p>
+    <p><strong>Dates:</strong> ${dates}</p>
+    <p><strong>Location:</strong> ${location}</p>
 
-    <p><a href="${escapeHtml(event.sourceUrl)}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
+    <p><a href="${url}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
 
-    <hr class="rule" />
-
+    <hr />
     <h2>Source text</h2>
-    <pre class="source-text">${sourceText}</pre>
+    <pre class="source-text" id="source-pre"></pre>
   `;
+
+  const pre = document.getElementById("source-pre");
+  pre.textContent = event.sourceText || "No source text captured for this event.";
 }
 
 function init() {
@@ -41,17 +37,11 @@ function init() {
   const eventId = params.get("id");
   const stored = sessionStorage.getItem("usChessSelectedTournament");
 
-  if (!stored) {
-    missingView();
-    return;
-  }
+  if (!stored) return missingView();
 
   try {
     const event = JSON.parse(stored);
-    if (!eventId || event.id !== eventId) {
-      missingView();
-      return;
-    }
+    if (!eventId || event.id !== eventId) return missingView();
     renderTournament(event);
   } catch {
     missingView();
