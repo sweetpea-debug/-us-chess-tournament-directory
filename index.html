@@ -6,7 +6,7 @@
     <title>US Chess Tournament Radar</title>
     <meta
       name="description"
-      content="Daily-updating United States chess tournament directory. Filter by state and open any event to see source text."
+      content="Daily-updating United States chess tournament directory. Filter by state and open any event to view the source text."
     />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -16,7 +16,8 @@
         <p class="hero__eyebrow">UNITED STATES CHESS TOURNAMENT RADAR</p>
         <h1>Find tournaments across the United States</h1>
         <p class="hero__subtitle">
-          Daily ingest from federation/organizer listings. Filter by state and open any event to see the full source text.
+          Daily ingest from federation/organizer listings. Filter by state and open any event to see
+          the full source text.
         </p>
         <div class="hero__meta">
           <span id="sync-label">Last sync: never</span>
@@ -24,17 +25,15 @@
       </div>
     </header>
 
-    <main class="container">
+    <main class="container" style="margin-top: 1.2rem; margin-bottom: 2rem; display: grid; gap: 1rem;">
       <section class="panel" aria-label="Filters">
         <h2>Filters</h2>
-
         <label class="field" for="state-filter">
           <span>US state</span>
           <select id="state-filter">
             <option value="all">All states</option>
           </select>
         </label>
-
         <p id="status-message" class="muted" aria-live="polite"></p>
       </section>
 
@@ -43,7 +42,6 @@
           <h2>Tournaments</h2>
           <p id="result-count" class="muted">Waiting for data…</p>
         </div>
-
         <div id="cards" class="cards"></div>
       </section>
     </main>
@@ -56,38 +54,6 @@
         <button type="button" class="btn card__open">Open details</button>
       </article>
     </template>
-
-    <script>
-      window.__radarBooted = false;
-      window.setTimeout(() => {
-        if (window.__radarBooted) return;
-
-        const status = document.getElementById("status-message");
-        const resultCount = document.getElementById("result-count");
-        const cards = document.getElementById("cards");
-
-        if (status) status.textContent = "The app script did not load. Re-copy app.js, data.js, and utils.js as full files.";
-        if (resultCount) resultCount.textContent = "Data did not load";
-        if (cards && !cards.children.length) {
-          cards.innerHTML = '<p class="muted">No cards rendered yet. This usually means one JS file was pasted with extra markdown text.</p>';
-        }
-      }, 2500);
-
-      window.addEventListener("error", (event) => {
-        if (window.__radarBooted) return;
-
-        const status = document.getElementById("status-message");
-        const resultCount = document.getElementById("result-count");
-        const cards = document.getElementById("cards");
-        const locationHint = event.filename ? `${event.filename}:${event.lineno || "?"}` : "unknown file";
-
-        if (status) status.textContent = `JavaScript error before startup (${locationHint}). Re-copy app.js, data.js, and utils.js as plain file text only.`;
-        if (resultCount) resultCount.textContent = "Startup error";
-        if (cards && !cards.children.length) {
-          cards.innerHTML = `<p class="muted">Startup failed: ${event.message || "Unknown JavaScript error"}</p>`;
-        }
-      });
-    </script>
 
     <script type="module" src="app.js"></script>
   </body>
