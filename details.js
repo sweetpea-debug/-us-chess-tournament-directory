@@ -1,6 +1,11 @@
-import { formatDateRange } from "./utils.js";
+import { SOURCE_CATALOG } from "./data.js";
+import { escapeHtml, formatDateRange } from "./utils.js";
 
 const detailsRoot = document.getElementById("details");
+
+function resolveSource(sourceId) {
+  return SOURCE_CATALOG.find((s) => s.id === sourceId);
+}
 
 function missingView() {
   detailsRoot.innerHTML = `
@@ -10,26 +15,33 @@ function missingView() {
 }
 
 function renderTournament(event) {
-  const safeName = event.name || "Untitled event";
-  const dates = formatDateRange(event.startDate, event.endDate);
-  const location = `${event.city || "Unknown"}, ${event.state || "US"}`;
-  const url = event.sourceUrl || "#";
+  const source = resolveSource(event.sourceId);
+
+  const title = escapeHtml(event.name || "Untitled event");
+  const dates = escapeHtml(formatDateRange(event.startDate, event.endDate));
+  const location = escapeHtml(`${event.city || "Unknown"}, ${event.state || "US"}`);
+  const sourceUrl = escapeHtml(event.sourceUrl || "#");
+
+  const sourceText = (event.sourceText || "").trim();
 
   detailsRoot.innerHTML = `
-    <h1>${safeName}</h1>
+    <h1>${title}</h1>
 
     <p><strong>Dates:</strong> ${dates}</p>
     <p><strong>Location:</strong> ${location}</p>
 
-    <p><a href="${url}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
+    <p><a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">Open official listing</a></p>
 
     <hr />
-    <h2>Source text</h2>
-    <pre class="source-text" id="source-pre"></pre>
-  `;
 
-  const pre = document.getElementById("source-pre");
-  pre.textContent = event.sourceText || "No source text captured for this event.";
+    <h2>Source text</h2>
+    ${
+      sourceText
+        ? `<pre class="source-text">${escapeHtml(sourceText)}</pre>`
+        : `<p class="muted">No source text cached yet for this event. (It may appear after a future daily ingest.)</p>`
+    }
+    <p class="muted">Source: ${escapeHtml(source?.name || event.sourceId || "Unknown")}</p>
+  `;
 }
 
 function init() {
